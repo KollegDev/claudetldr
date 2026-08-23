@@ -18,8 +18,8 @@ a single dependency-free HTML file you can also right-click-save and use offline
 ### 1. Connect the Claude session store (no CLI — v9)
 
 The Claude desktop app writes each session to a local `audit.jsonl`. The viewer
-reads those files directly: click **"connect Claude sessions folder"** once and
-pick the store —
+reads those files directly: click **"connect Cowork"** once and pick the
+store —
 
 | OS | Path |
 |---|---|

@@ -83,7 +83,7 @@
   </header>
 
   <div class="controls">
-    <button class="primary" id="connectBtn" onclick="connectSessions()">connect Claude sessions folder</button>
+    <button class="primary" id="connectBtn" onclick="connectSessions()">connect Cowork</button>
     <button id="backBtn" onclick="showSessionList()" style="display:none">&larr; sessions</button>
     <input id="search" type="search" placeholder="Search everything..." oninput="doSearch(this.value)">
     <button onclick="setAll(true)">Expand all</button>
@@ -92,11 +92,10 @@
   </div>
 
   <div id="dropzone">
-    <strong>No CLI, no bridge:</strong> click "connect Claude sessions folder" once and pick the Claude
-    desktop app's session store - the viewer finds every conversation itself and lists them by title.<br>
-    Windows: <code>%APPDATA%\Claude\local-agent-mode-sessions</code> &nbsp;&middot;&nbsp;
-    macOS: <code>~/Library/Application Support/Claude/local-agent-mode-sessions</code><br>
-    Nothing leaves your browser. <strong>Fallback:</strong> paste any copied chat (Ctrl+V) anywhere here.
+    <strong>Connect Cowork</strong> and pick
+    <code>%APPDATA%\Claude\local-agent-mode-sessions</code>
+    (macOS: <code>~/Library/Application Support/Claude/local-agent-mode-sessions</code>).<br>
+    Nothing leaves your browser. Or paste any copied chat (Ctrl+V) anywhere here.
   </div>
 
   <div id="sessions" style="display:none"></div>
