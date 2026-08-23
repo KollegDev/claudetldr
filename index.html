@@ -174,7 +174,11 @@
       if (ev.type === 'user') {
         if (!isRealUserTurn(ev)) continue;
         const t = stripNoise(blocksToText((ev.message || {}).content));
-        if (t) turns.push({ role: 'You', text: t, ts });
+        if (!t) continue;
+        if (/^Base directory for this skill:/.test(t)) continue;   // skill expansions
+        const prevUser = turns.filter(x => x.role === 'You').pop();
+        if (prevUser && prevUser.text === t) continue;             // duplicated user events
+        turns.push({ role: 'You', text: t, ts });
       } else if (ev.type === 'assistant') {
         const t = blocksToText((ev.message || {}).content).trim();
         if (!t) continue;
