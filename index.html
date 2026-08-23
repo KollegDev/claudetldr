@@ -68,7 +68,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v7</span></h1>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v8</span></h1>
     <span class="status" id="status">no conversation loaded</span>
   </header>
 
@@ -256,8 +256,58 @@
   }
 
   // ================= live mode: folder (preferred) or single file =================
-  let dirHandle = null, fileHandle = null, pollTimer = null;
+  let dirHandle = null, fileHandle = null, pollTimer = null, storedHandle = null;
   const lastMods = {};
+
+  // -- tiny IndexedDB store so the folder survives reloads --
+  function idb() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open('tldr-viewer', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('handles');
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  }
+  async function saveHandle(h) {
+    try {
+      const db = await idb();
+      db.transaction('handles', 'readwrite').objectStore('handles').put(h, 'dir');
+    } catch (e) { /* private mode etc. - persistence is best-effort */ }
+  }
+  async function loadHandle() {
+    try {
+      const db = await idb();
+      return await new Promise((res, rej) => {
+        const rq = db.transaction('handles').objectStore('handles').get('dir');
+        rq.onsuccess = () => res(rq.result || null);
+        rq.onerror = () => rej(rq.error);
+      });
+    } catch (e) { return null; }
+  }
+
+  function startPolling() {
+    clearInterval(pollTimer);
+    pollOnce(true);
+    pollTimer = setInterval(pollOnce, 2000);
+  }
+
+  // on load: silently resume if the browser still trusts the stored handle,
+  // otherwise turn the button into a one-click reconnect
+  (async function resume() {
+    if (location.protocol === 'file:' || !window.indexedDB) return;
+    storedHandle = await loadHandle();
+    if (!storedHandle) return;
+    try {
+      const p = await storedHandle.queryPermission({ mode: 'read' });
+      if (p === 'granted') {
+        dirHandle = storedHandle;
+        document.getElementById('connectBtn').textContent = 'connected (' + storedHandle.name + ')';
+        startPolling();
+      } else {
+        document.getElementById('connectBtn').textContent = 'reconnect: ' + storedHandle.name;
+      }
+    } catch (e) { /* stale handle - normal picker path applies */ }
+  })();
 
   async function connectFile() {
     const st = document.getElementById('status');
@@ -265,13 +315,26 @@
       st.textContent = 'folder access is blocked on file:// - run "python -m http.server 8000" in this folder and open http://localhost:8000/tldr-viewer.html (or just paste a chat here)';
       return;
     }
+    // one-click path: re-authorize the remembered folder (needs this user gesture)
+    if (storedHandle && !dirHandle) {
+      try {
+        const p = await storedHandle.requestPermission({ mode: 'read' });
+        if (p === 'granted') {
+          dirHandle = storedHandle;
+          document.getElementById('connectBtn').textContent = 'connected (' + storedHandle.name + ')';
+          startPolling();
+          return;
+        }
+      } catch (e) { /* fall through to a fresh pick */ }
+      storedHandle = null;
+    }
     if (window.showDirectoryPicker) {
       try {
         dirHandle = await window.showDirectoryPicker();
-        document.getElementById('connectBtn').textContent = 'connected (folder)';
-        await pollOnce(true);
-        clearInterval(pollTimer);
-        pollTimer = setInterval(pollOnce, 2000);
+        saveHandle(dirHandle);
+        storedHandle = dirHandle;
+        document.getElementById('connectBtn').textContent = 'connected (' + dirHandle.name + ')';
+        startPolling();
         return;
       } catch (e) {
         if (e && e.name === 'AbortError') { st.textContent = 'folder pick cancelled'; return; }
@@ -289,9 +352,7 @@
         types: [{ description:'Markdown', accept:{'text/markdown':['.md'],'text/plain':['.txt','.md']} }]
       });
       document.getElementById('connectBtn').textContent = 'connected (file)';
-      await pollOnce(true);
-      clearInterval(pollTimer);
-      pollTimer = setInterval(pollOnce, 2000);
+      startPolling();
     } catch (e) {
       st.textContent = (e && e.name === 'AbortError')
         ? 'file pick cancelled'
@@ -398,7 +459,7 @@
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
     caps.push('filePicker=' + (typeof window.showOpenFilePicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
-    const msg = 'v7 ready · ' + caps.join(' · ');
+    const msg = 'v8 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
     if (st) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);
