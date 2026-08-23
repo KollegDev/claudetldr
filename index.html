@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TL;DR Chat Mirror</title>
+<style>
+  :root {
+    --bg:#faf9f5; --card:#fff; --ink:#1a1915; --muted:#6b6a63;
+    --accent:#c96442; --user:#3d6ea5; --line:#e8e6df; --mark:#ffe9a8; --warn:#a3660a; --live:#2e7d4f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1a1915; --card:#24231e; --ink:#f0efe9; --muted:#a3a199;
+            --line:#3a3830; --mark:#5c4a12; --warn:#e0a43c; --user:#7ea8d8; --live:#5cb884; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.6 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  .wrap { max-width:860px; margin:0 auto; padding:1.5rem 1rem 3rem; }
+  header { display:flex; flex-wrap:wrap; gap:.75rem; align-items:center; justify-content:space-between; margin-bottom:.5rem; }
+  h1 { font-size:1.2rem; margin:0; letter-spacing:-.01em; }
+  .status { font-size:.78rem; color:var(--muted); }
+  .status.live::before { content:"\25CF "; color:var(--live); }
+  .controls { display:flex; gap:.5rem; flex-wrap:wrap; margin:.75rem 0 1.25rem; }
+  .controls button, .controls input, .controls label.chk {
+    font:inherit; font-size:.83rem; border:1px solid var(--line); border-radius:8px;
+    background:var(--card); color:var(--ink); padding:.4rem .8rem;
+  }
+  .controls button { cursor:pointer; }
+  .controls button:hover { border-color:var(--accent); color:var(--accent); }
+  .controls button.primary { border-color:var(--accent); color:var(--accent); font-weight:600; }
+  .controls input[type=search] { flex:1; min-width:170px; }
+  .controls label.chk { display:inline-flex; align-items:center; gap:.4rem; cursor:pointer; user-select:none; }
+  #dropzone { border:2px dashed var(--line); border-radius:14px; padding:2rem 1.5rem;
+    text-align:center; color:var(--muted); background:var(--card); margin-bottom:1rem; font-size:.9rem; }
+  #dropzone strong { color:var(--ink); }
+  #dropzone.compact { display:none; }
+  article.entry { background:var(--card); border:1px solid var(--line); border-radius:12px;
+                  padding:.9rem 1.2rem; margin-bottom:.7rem; scroll-margin-top:1rem; }
+  article.entry.untagged { border-left:3px solid var(--warn); }
+  article.entry.user { background:transparent; border:none; border-left:3px solid var(--user);
+                       border-radius:0; padding:.3rem 1.2rem; margin:1.1rem 0 .7rem; }
+  article.entry.focused { outline:2px solid var(--accent); outline-offset:2px; }
+  .entry-head { display:flex; align-items:baseline; gap:.6rem; cursor:pointer; }
+  .entry-num { color:var(--accent); font-weight:700; font-size:.8rem; white-space:nowrap; }
+  .entry.user .entry-num { color:var(--user); }
+  .entry.untagged .entry-num { color:var(--warn); }
+  .entry-tldr { flex:1; }
+  .entry.user .entry-tldr { color:var(--user); font-weight:500; font-size:.92rem; }
+  .entry-state { font-size:.7rem; color:var(--muted); white-space:nowrap; }
+  .entry.expandable.open .entry-state::after { content:"collapse"; }
+  .entry.expandable:not(.open):not(.stub) .entry-state::after { content:"original"; }
+  .entry.expandable:not(.open).stub .entry-state::after { content:"not synced"; }
+  .entry-full { display:none; margin-top:.8rem; padding-top:.8rem; border-top:1px dashed var(--line); }
+  .entry.open .entry-full { display:block; }
+  .entry.hit-hidden { display:none; }
+  .original { white-space:pre-wrap; overflow-wrap:break-word; font-size:.88rem;
+              max-height:70vh; overflow-y:auto; }
+  .original .fence { display:block; background:var(--bg); border:1px solid var(--line);
+                     border-radius:8px; padding:.7rem; margin:.4rem 0;
+                     font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; }
+  .stub-note { color:var(--muted); font-style:italic; font-size:.85rem; }
+  mark { background:var(--mark); color:inherit; border-radius:2px; }
+  .hint { font-size:.75rem; color:var(--muted); text-align:center; margin-top:1.5rem; }
+  .empty-note { color:var(--muted); font-size:.85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v7</span></h1>
+    <span class="status" id="status">no conversation loaded</span>
+  </header>
+
+  <div class="controls">
+    <button class="primary" id="connectBtn" onclick="connectFile()">connect workspace folder</button>
+    <input id="search" type="search" placeholder="Search everything..." oninput="doSearch(this.value)">
+    <button onclick="setAll(true)">Expand all</button>
+    <button onclick="setAll(false)">Collapse all</button>
+    <label class="chk"><input type="checkbox" id="autoclip" onchange="toggleAuto(this.checked)"> clipboard on focus</label>
+    <button onclick="loadDemo()">Demo</button>
+    <button onclick="loadDemoMerge()">Demo merge</button>
+  </div>
+
+  <div id="dropzone">
+    <strong>Fully automatic:</strong> click "connect workspace folder" once and pick the session's output folder -
+    the map (<code>chat-mirror.md</code>) and the verbatim originals (<code>chat-originals.md</code>, synced
+    mechanically from the transcript at zero token cost) both update themselves after every message.<br>
+    <strong>Fallbacks:</strong> pick just <code>chat-mirror.md</code> if folder access is unavailable;
+    paste any copied chat (Ctrl+V) anywhere here to fill originals manually.
+  </div>
+
+  <div id="entries"></div>
+  <p class="hint">Click / <strong>t</strong> toggle · <strong>j</strong>/<strong>k</strong> jump · blue waypoints are your messages · "not synced" fills in after one chat copy-paste</p>
+</div>
+
+<script>
+  // ================= state =================
+  const TAG_RE   = /^[>\s]*\**\s*TL;?DR\s*#?(\d+)\s*:?\**:?\s*(.*)$/i;
+  const SPEAK_RE = /^###\s*(?:\u{1F9D1}|\u{1F916})\s*(You|Claude)[^\n]*$/imu;
+  const SPLIT_RE = /^(###\s*(?:\u{1F9D1}|\u{1F916})\s*(?:You|Claude)[^\n]*)$/mu;
+  const UNTAGGED_MIN_CHARS = 400;
+  let entriesState = [];          // current skeleton/flat entries
+  let originalsCache = {};        // tag num -> verbatim body (from pasted flat chat)
+  let sourceLabel = "";
+  let lastFileText = "";
+
+  // ================= parsers =================
+  function parseMirror(text) {
+    const chunks = text.split(SPLIT_RE);
+    const entries = [];
+    for (let i = 1; i < chunks.length; i += 2) {
+      const head = chunks[i];
+      const body = (chunks[i+1] || "").trim();
+      const isUser = /You/i.test(head);
+      const turn = (head.match(/turn\s*(\d+)/i) || [])[1] || null;
+      if (isUser) {
+        if (!body) continue;
+        const firstLine = body.split(/\n/).find(l => l.trim()) || "";
+        const short = body.length <= 300 && !body.includes("\n\n");
+        entries.push({ kind:'user', num:turn, tldr: short ? body : firstLine.slice(0,160)+' ...',
+                       body: short ? null : body });
+      } else {
+        const rawLines = body.split(/\n/);
+        let tldr = null, num = turn, tagIdx = -1;
+        for (let li = 0; li < rawLines.length; li++) {
+          const m = rawLines[li].match(TAG_RE);
+          if (m && m[2] && m[2].trim()) { tldr = m[2].replace(/\**$/,'').trim(); num = m[1] || num; tagIdx = li; break; }
+        }
+        const rest = rawLines.filter((l, li) => li !== tagIdx).join("\n").trim();
+        entries.push({ kind:'claude', num:num, tagged: !!tldr,
+                       tldr: tldr || (rawLines.find(l=>l.trim())||'').slice(0,120) || '(empty)',
+                       body: rest || null });
+      }
+    }
+    return entries;
+  }
+
+  function parseFlat(text) {
+    const lines = text.split(/\r?\n/);
+    const raw = []; let cur = null;
+    for (const line of lines) {
+      const m = line.match(TAG_RE);
+      if (m && m[2] && m[2].trim()) {
+        if (cur) raw.push(cur);
+        cur = { num:m[1], tldr:m[2].replace(/\**$/,'').trim(), body:[], tagged:true };
+      } else {
+        if (!cur) cur = { num:null, tldr:null, body:[], tagged:false };
+        cur.body.push(line);
+      }
+    }
+    if (cur) raw.push(cur);
+    const out = [];
+    for (const e of raw) {
+      const bodyText = e.body.join("\n").trim();
+      if (!e.tagged) {
+        if (!bodyText) continue;
+        if (out.length && bodyText.length < UNTAGGED_MIN_CHARS) {
+          out[out.length-1].body += "\n\n" + bodyText; continue;
+        }
+        e.tldr = (bodyText.split(/\n/).find(l=>l.trim())||'(untagged)').trim().slice(0,120);
+        out.push({ kind:'claude', num:null, tagged:false, tldr:e.tldr, body:bodyText });
+      } else {
+        out.push({ kind:'claude', num:e.num, tagged:true, tldr:e.tldr, body:bodyText });
+      }
+    }
+    return out;
+  }
+
+  // ================= merge =================
+  function absorbOriginals(flatEntries) {
+    let added = 0;
+    for (const e of flatEntries) {
+      if (e.tagged && e.num && e.body && e.body.trim()) {
+        originalsCache[e.num] = e.body; added++;
+      }
+    }
+    return added;
+  }
+
+  // ================= rendering =================
+  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  function renderBody(text) {
+    if (!text) return "";
+    const parts = String(text).split(/```/);
+    let html = "";
+    parts.forEach((p, i) => {
+      html += (i % 2 === 1)
+        ? '<span class="fence">' + esc(p.replace(/^[a-z]*\n/,'')) + '</span>'
+        : esc(p);
+    });
+    return html;
+  }
+
+  function render() {
+    const box = document.getElementById('entries');
+    if (!entriesState.length) {
+      box.innerHTML = '<p class="empty-note">Nothing parseable found.</p>'; return;
+    }
+    let synced = 0, claudeCount = 0;
+    box.innerHTML = entriesState.map((e, i) => {
+      let body = e.body, stub = false;
+      if (e.kind === 'claude') {
+        claudeCount++;
+        if (!body && e.num && originalsCache[e.num]) body = originalsCache[e.num];
+        if (body) synced++; else stub = true;
+      }
+      const expandable = e.kind === 'claude' || !!body;
+      const num = e.kind === 'user' ? 'you' + (e.num ? ' · '+e.num : '')
+                : e.tagged === false ? 'untagged' : '#'+(e.num || '?');
+      const fullHtml = body ? renderBody(body)
+        : '<span class="stub-note">Original not synced yet - select-all + copy the chat, then paste here (or enable clipboard on focus and alt-tab back).</span>';
+      return `
+      <article class="entry ${e.kind} ${e.tagged===false?'untagged':''} ${expandable?'expandable':''} ${stub?'stub':''}" id="e${i}">
+        <div class="entry-head" ${expandable?'onclick="toggleEntry(this.parentElement)"':''}>
+          <span class="entry-num">${num}</span>
+          <span class="entry-tldr">${esc(e.tldr || '')}</span>
+          ${expandable?'<span class="entry-state"></span>':''}
+        </div>
+        ${expandable?`<div class="entry-full"><div class="original">${fullHtml}</div></div>`:''}
+      </article>`;
+    }).join("");
+    const u = entriesState.filter(e=>e.kind==='user').length;
+    const st = document.getElementById('status');
+    st.textContent = `${claudeCount} responses (${synced} originals synced) · ${u} of your messages · ${sourceLabel} · ${new Date().toLocaleTimeString()}`;
+    st.classList.toggle('live', sourceLabel.startsWith('live'));
+    document.getElementById('dropzone').classList.add('compact');
+    cursor = -1;
+  }
+
+  function ingest(text, label) {
+    if (!text || !text.trim()) return;
+    if (SPEAK_RE.test(text)) {
+      const parsed = parseMirror(text);
+      const isOriginals = /^#\s*Chat Originals/im.test(text) || (label||'').includes('originals');
+      if (isOriginals) {
+        for (const e of parsed) {
+          if (e.kind === 'claude' && e.num && e.body) originalsCache[e.num] = e.body;
+        }
+        if (!entriesState.length) { entriesState = parsed; sourceLabel = label || 'originals'; }
+      } else {
+        entriesState = parsed;
+        sourceLabel = label || 'mirror';
+      }
+    } else {
+      // flat chat copy: primarily a source of originals
+      const flat = parseFlat(text);
+      const added = absorbOriginals(flat);
+      if (!entriesState.length || added === 0) {
+        // no skeleton yet (or nothing merged): show flat standalone
+        entriesState = flat.map(e => ({...e}));
+        sourceLabel = label || 'pasted chat';
+      }
+    }
+    render();
+  }
+
+  // ================= live mode: folder (preferred) or single file =================
+  let dirHandle = null, fileHandle = null, pollTimer = null;
+  const lastMods = {};
+
+  async function connectFile() {
+    const st = document.getElementById('status');
+    if (location.protocol === 'file:') {
+      st.textContent = 'folder access is blocked on file:// - run "python -m http.server 8000" in this folder and open http://localhost:8000/tldr-viewer.html (or just paste a chat here)';
+      return;
+    }
+    if (window.showDirectoryPicker) {
+      try {
+        dirHandle = await window.showDirectoryPicker();
+        document.getElementById('connectBtn').textContent = 'connected (folder)';
+        await pollOnce(true);
+        clearInterval(pollTimer);
+        pollTimer = setInterval(pollOnce, 2000);
+        return;
+      } catch (e) {
+        if (e && e.name === 'AbortError') { st.textContent = 'folder pick cancelled'; return; }
+        st.textContent = 'folder picker failed (' + (e && e.name || e) + ') - trying single file...';
+      }
+    } else {
+      st.textContent = 'this browser has no folder picker (Chrome/Edge needed) - trying single file...';
+    }
+    if (!window.showOpenFilePicker) {
+      st.textContent = 'no File System Access API here - use paste (Ctrl+V) or Chrome/Edge on localhost';
+      return;
+    }
+    try {
+      [fileHandle] = await window.showOpenFilePicker({
+        types: [{ description:'Markdown', accept:{'text/markdown':['.md'],'text/plain':['.txt','.md']} }]
+      });
+      document.getElementById('connectBtn').textContent = 'connected (file)';
+      await pollOnce(true);
+      clearInterval(pollTimer);
+      pollTimer = setInterval(pollOnce, 2000);
+    } catch (e) {
+      st.textContent = (e && e.name === 'AbortError')
+        ? 'file pick cancelled'
+        : 'file picker failed: ' + (e && e.name || e) + ' - paste the chat instead (Ctrl+V)';
+    }
+  }
+
+  async function readIfChanged(handle, key, force) {
+    const f = await handle.getFile();
+    if (!force && f.lastModified === lastMods[key]) return null;
+    lastMods[key] = f.lastModified;
+    return await f.text();
+  }
+
+  async function pollOnce(force) {
+    try {
+      if (dirHandle) {
+        // originals first so a fresh skeleton render already has the cache
+        try {
+          const h = await dirHandle.getFileHandle('chat-originals.md');
+          const t = await readIfChanged(h, 'originals', force);
+          if (t && t.trim()) ingest(t, 'live originals');
+        } catch (e) { /* file not there yet */ }
+        try {
+          const h = await dirHandle.getFileHandle('chat-mirror.md');
+          const t = await readIfChanged(h, 'mirror', force);
+          if (t && t.trim()) ingest(t, 'live · chat-mirror.md');
+        } catch (e) { /* file not there yet */ }
+      } else if (fileHandle) {
+        const t = await readIfChanged(fileHandle, 'single', force);
+        if (t && t.trim()) ingest(t, 'live · file');
+      }
+    } catch (e) {
+      document.getElementById('status').textContent = 'lost access - reconnect';
+      document.getElementById('status').classList.remove('live');
+    }
+  }
+
+  // ================= fallback ingestion =================
+  document.addEventListener('paste', e => {
+    const t = (e.clipboardData || window.clipboardData).getData('text');
+    if (t) { e.preventDefault(); ingest(t, 'pasted'); }
+  });
+  let auto = false;
+  function toggleAuto(on) { auto = on; if (on) tryClipboard(); }
+  async function tryClipboard() {
+    try { ingest(await navigator.clipboard.readText(), 'clipboard'); }
+    catch (err) {
+      document.getElementById('status').textContent = 'clipboard blocked - allow access or paste manually';
+    }
+  }
+  window.addEventListener('focus', () => { if (auto) tryClipboard(); });
+
+  // ================= interaction =================
+  function toggleEntry(el){ el.classList.toggle('open'); }
+  function setAll(open){ document.querySelectorAll('.entry.expandable').forEach(e=>e.classList.toggle('open',open)); }
+  function doSearch(q){
+    q = q.trim().toLowerCase();
+    document.querySelectorAll('.entry').forEach(e=>{
+      e.querySelectorAll('mark').forEach(m=>m.replaceWith(m.textContent));
+      e.normalize();
+      if(!q){ e.classList.remove('hit-hidden'); return; }
+      const hit = e.textContent.toLowerCase().includes(q);
+      e.classList.toggle('hit-hidden', !hit);
+      if(hit && e.classList.contains('expandable') && !e.classList.contains('stub')){
+        e.classList.add('open'); highlight(e, q);
+      }
+    });
+  }
+  function highlight(root, q){
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const nodes = []; let n;
+    while (n = walker.nextNode()) if (n.textContent.toLowerCase().includes(q)) nodes.push(n);
+    nodes.forEach(node=>{
+      const i = node.textContent.toLowerCase().indexOf(q);
+      const range = document.createRange();
+      range.setStart(node, i); range.setEnd(node, i + q.length);
+      const mark = document.createElement('mark');
+      try { range.surroundContents(mark); } catch(e) {}
+    });
+  }
+  let cursor = -1;
+  function visible(){ return [...document.querySelectorAll('.entry:not(.hit-hidden)')]; }
+  document.addEventListener('keydown', e=>{
+    if (/input|textarea/i.test(document.activeElement.tagName)) return;
+    const list = visible();
+    if (!list.length) return;
+    if (e.key === 'j' || e.key === 'k') {
+      cursor = Math.min(Math.max(cursor + (e.key === 'j' ? 1 : -1), 0), list.length - 1);
+      list.forEach(el => el.classList.remove('focused'));
+      list[cursor].classList.add('focused');
+      list[cursor].scrollIntoView({behavior:'smooth', block:'center'});
+    }
+    if (e.key === 't') {
+      const target = list[cursor] || list.find(el=>el.classList.contains('expandable'));
+      if (target && target.classList.contains('expandable')) toggleEntry(target);
+    }
+  });
+
+  // ================= startup capability check =================
+  (function(){
+    const caps = [];
+    caps.push('protocol=' + location.protocol);
+    caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
+    caps.push('filePicker=' + (typeof window.showOpenFilePicker === 'function'));
+    caps.push('secureContext=' + window.isSecureContext);
+    const msg = 'v7 ready · ' + caps.join(' · ');
+    const st = document.getElementById('status');
+    if (st) st.textContent = msg;
+    console.log('[tldr-viewer] ' + msg);
+  })();
+
+  // ================= demos =================
+  const DEMO_SKELETON = `# Chat Mirror - TLDR toggle design session
+
+### \u{1F9D1} You - turn 1
+In long conversations it becomes hard to work productively because of walls of text. Navigation becomes difficult.
+
+### \u{1F916} Claude - turn 1
+> **TL;DR #1:** Problem confirmed: transcript navigation, not answer length. Summaries must live inside the messages; the viewer only filters.
+
+### \u{1F9D1} You - turn 2
+Is the mirror rewrite token expensive? Doesn't it double generation time?
+
+### \u{1F916} Claude - turn 2
+> **TL;DR #2:** Yes - full rewrite is quadratic. Fix: skeleton mode. Mirror holds only your messages + tag lines; originals merge lazily from a chat copy.
+
+### \u{1F9D1} You - turn 3
+Ok, skeleton + lazy merge it is.
+
+### \u{1F916} Claude - turn 3
+> **TL;DR #3:** Skeleton mode shipped: appends cost ~50 tokens/turn, viewer polls the file live, "not synced" entries fill in after one Ctrl+A copy of the chat.
+`;
+  const DEMO_FLAT = `> **TL;DR #1:** Problem confirmed: transcript navigation, not answer length. Summaries must live inside the messages; the viewer only filters.
+
+The chat stream is append-only prose with no outline, collapse or search. Any derived mirror creates a sync problem - someone must keep it current. Embedding the summary in each message removes that dependency: every copy of the conversation already carries its compact layer. The viewer degenerates from live mirror to filter, which is a much easier component to make reliable.
+
+> **TL;DR #2:** Yes - full rewrite is quadratic. Fix: skeleton mode. Mirror holds only your messages + tag lines; originals merge lazily from a chat copy.
+
+Full accounting: rewriting the whole history each turn means output-per-turn grows with session length - quadratic total, in output tokens, the expensive kind. Skeleton mode drops per-turn overhead to roughly the size of your message plus one tag line (~50-100 tokens). Originals are never generated twice; they are copied, and copying is free.
+
+\`\`\`
+per-turn cost: full rewrite  O(n)   -> total O(n^2)
+               append full   ~2x    -> total linear
+               skeleton      ~0     -> total negligible
+\`\`\`
+
+> **TL;DR #3:** Skeleton mode shipped: appends cost ~50 tokens/turn, viewer polls the file live, "not synced" entries fill in after one Ctrl+A copy of the chat.
+
+The merge keys on the tag numbers: pasted flat chat is parsed, each tagged segment's body is cached under its number, and every skeleton entry with a matching number gets its original filled in. The cache persists across live file updates, so one paste back-fills the whole session and stays.`;
+
+  function loadDemo(){ ingest(DEMO_SKELETON, 'demo skeleton'); }
+  function loadDemoMerge(){ ingest(DEMO_FLAT, 'demo merge'); }
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# never commit conversation data
+chat-mirror.md
+chat-originals.md
+*.jsonl
+cowork_inspector_report.txt
+claude-mirror/
+mirror-out/
+*.log
+*.skill
+
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+.DS_Store
+Thumbs.db
