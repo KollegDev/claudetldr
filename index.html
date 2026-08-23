@@ -34,7 +34,19 @@
   #dropzone { border:2px dashed var(--line); border-radius:14px; padding:2rem 1.5rem;
     text-align:center; color:var(--muted); background:var(--card); margin-bottom:1rem; font-size:.9rem; }
   #dropzone strong { color:var(--ink); }
+  #dropzone code { font-size:.8rem; }
   #dropzone.compact { display:none; }
+  /* session list */
+  .session { background:var(--card); border:1px solid var(--line); border-radius:12px;
+             padding:.8rem 1.1rem; margin-bottom:.6rem; cursor:pointer;
+             display:flex; align-items:baseline; gap:.8rem; }
+  .session:hover { border-color:var(--accent); }
+  .session .s-title { flex:1; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .session .s-title.untitled { color:var(--muted); font-weight:400; font-style:italic; }
+  .session .s-meta { font-size:.75rem; color:var(--muted); white-space:nowrap; }
+  .session .s-active { font-size:.7rem; color:var(--live); font-weight:700; white-space:nowrap; }
+  .list-note { color:var(--muted); font-size:.85rem; margin:.4rem 0 1rem; }
+  /* entries */
   article.entry { background:var(--card); border:1px solid var(--line); border-radius:12px;
                   padding:.9rem 1.2rem; margin-bottom:.7rem; scroll-margin-top:1rem; }
   article.entry.untagged { border-left:3px solid var(--warn); }
@@ -49,8 +61,7 @@
   .entry.user .entry-tldr { color:var(--user); font-weight:500; font-size:.92rem; }
   .entry-state { font-size:.7rem; color:var(--muted); white-space:nowrap; }
   .entry.expandable.open .entry-state::after { content:"collapse"; }
-  .entry.expandable:not(.open):not(.stub) .entry-state::after { content:"original"; }
-  .entry.expandable:not(.open).stub .entry-state::after { content:"not synced"; }
+  .entry.expandable:not(.open) .entry-state::after { content:"original"; }
   .entry-full { display:none; margin-top:.8rem; padding-top:.8rem; border-top:1px dashed var(--line); }
   .entry.open .entry-full { display:block; }
   .entry.hit-hidden { display:none; }
@@ -59,7 +70,6 @@
   .original .fence { display:block; background:var(--bg); border:1px solid var(--line);
                      border-radius:8px; padding:.7rem; margin:.4rem 0;
                      font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; }
-  .stub-note { color:var(--muted); font-style:italic; font-size:.85rem; }
   mark { background:var(--mark); color:inherit; border-radius:2px; }
   .hint { font-size:.75rem; color:var(--muted); text-align:center; margin-top:1.5rem; }
   .empty-note { color:var(--muted); font-size:.85rem; }
@@ -68,198 +78,284 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v8</span></h1>
-    <span class="status" id="status">no conversation loaded</span>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v9</span></h1>
+    <span class="status" id="status">not connected</span>
   </header>
 
   <div class="controls">
-    <button class="primary" id="connectBtn" onclick="connectFile()">connect workspace folder</button>
+    <button class="primary" id="connectBtn" onclick="connectSessions()">connect Claude sessions folder</button>
+    <button id="backBtn" onclick="showSessionList()" style="display:none">&larr; sessions</button>
     <input id="search" type="search" placeholder="Search everything..." oninput="doSearch(this.value)">
     <button onclick="setAll(true)">Expand all</button>
     <button onclick="setAll(false)">Collapse all</button>
-    <label class="chk"><input type="checkbox" id="autoclip" onchange="toggleAuto(this.checked)"> clipboard on focus</label>
     <button onclick="loadDemo()">Demo</button>
-    <button onclick="loadDemoMerge()">Demo merge</button>
   </div>
 
   <div id="dropzone">
-    <strong>Fully automatic:</strong> click "connect workspace folder" once and pick the session's output folder -
-    the map (<code>chat-mirror.md</code>) and the verbatim originals (<code>chat-originals.md</code>, synced
-    mechanically from the transcript at zero token cost) both update themselves after every message.<br>
-    <strong>Fallbacks:</strong> pick just <code>chat-mirror.md</code> if folder access is unavailable;
-    paste any copied chat (Ctrl+V) anywhere here to fill originals manually.
+    <strong>No CLI, no bridge:</strong> click "connect Claude sessions folder" once and pick the Claude
+    desktop app's session store - the viewer finds every conversation itself and lists them by title.<br>
+    Windows: <code>%APPDATA%\Claude\local-agent-mode-sessions</code> &nbsp;&middot;&nbsp;
+    macOS: <code>~/Library/Application Support/Claude/local-agent-mode-sessions</code><br>
+    Nothing leaves your browser. <strong>Fallback:</strong> paste any copied chat (Ctrl+V) anywhere here.
   </div>
 
+  <div id="sessions" style="display:none"></div>
   <div id="entries"></div>
-  <p class="hint">Click / <strong>t</strong> toggle · <strong>j</strong>/<strong>k</strong> jump · blue waypoints are your messages · "not synced" fills in after one chat copy-paste</p>
+  <p class="hint" id="hintBar">Click / <strong>t</strong> toggle &middot; <strong>j</strong>/<strong>k</strong> jump &middot; blue waypoints are your messages</p>
 </div>
 
 <script>
-  // ================= state =================
+  // ================= constants / state =================
   const TAG_RE   = /^[>\s]*\**\s*TL;?DR\s*#?(\d+)\s*:?\**:?\s*(.*)$/i;
   const SPEAK_RE = /^###\s*(?:\u{1F9D1}|\u{1F916})\s*(You|Claude)[^\n]*$/imu;
   const SPLIT_RE = /^(###\s*(?:\u{1F9D1}|\u{1F916})\s*(?:You|Claude)[^\n]*)$/mu;
-  const UNTAGGED_MIN_CHARS = 400;
-  let entriesState = [];          // current skeleton/flat entries
-  let originalsCache = {};        // tag num -> verbatim body (from pasted flat chat)
-  let sourceLabel = "";
-  let lastFileText = "";
+  const SKIP_TYPES = new Set(['system','command_lifecycle','rate_limit_event','tool_progress','result']);
+  const SKIP_DIRS  = new Set(['node_modules','.git']);
+  const TITLE_SLICE = 262144;      // bytes read per file for title extraction
+  const ACTIVE_MS   = 5 * 60 * 1000;
+  const MAX_SESSIONS = 30;
 
-  // ================= parsers =================
-  function parseMirror(text) {
-    const chunks = text.split(SPLIT_RE);
-    const entries = [];
-    for (let i = 1; i < chunks.length; i += 2) {
-      const head = chunks[i];
-      const body = (chunks[i+1] || "").trim();
-      const isUser = /You/i.test(head);
-      const turn = (head.match(/turn\s*(\d+)/i) || [])[1] || null;
-      if (isUser) {
-        if (!body) continue;
-        const firstLine = body.split(/\n/).find(l => l.trim()) || "";
-        const short = body.length <= 300 && !body.includes("\n\n");
-        entries.push({ kind:'user', num:turn, tldr: short ? body : firstLine.slice(0,160)+' ...',
-                       body: short ? null : body });
-      } else {
-        const rawLines = body.split(/\n/);
-        let tldr = null, num = turn, tagIdx = -1;
-        for (let li = 0; li < rawLines.length; li++) {
-          const m = rawLines[li].match(TAG_RE);
-          if (m && m[2] && m[2].trim()) { tldr = m[2].replace(/\**$/,'').trim(); num = m[1] || num; tagIdx = li; break; }
+  let view = 'sessions';           // 'sessions' | 'chat'
+  let entriesState = [];
+  let sourceLabel = "";
+  let rootHandle = null, storedHandle = null;
+  let sessionList = [];            // [{handle, path, mtime, size, title}]
+  let current = null;              // selected session {handle, ...}
+  let currentMod = 0;
+  let chatTimer = null, listTimer = null;
+
+  // ================= audit.jsonl parsing (port of bridge.py) =================
+  function stripNoise(t) {
+    return String(t)
+      .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+      .replace(/<command-message>[\s\S]*?<\/command-message>/g, '')
+      .trim();
+  }
+  function blocksToText(content) {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    const out = [];
+    for (const b of content) {
+      if (!b || typeof b !== 'object') continue;
+      if (b.type === 'text' && b.text) out.push(b.text);
+      else if (b.type === 'tool_use') out.push('[tool: ' + (b.name || '?') + ']');
+    }
+    return out.join('\n');
+  }
+  function isRealUserTurn(ev) {
+    if (!ev || ev.type !== 'user' || ev.parent_tool_use_id) return false;
+    const c = (ev.message || {}).content;
+    if (typeof c === 'string') return !!stripNoise(c);
+    if (Array.isArray(c)) {
+      if (c.some(b => b && typeof b === 'object' && b.type === 'tool_result')) return false;
+      return !!stripNoise(blocksToText(c));
+    }
+    return false;
+  }
+  function parseAudit(text) {
+    const events = [];
+    for (const line of text.split('\n')) {
+      const s = line.trim();
+      if (!s) continue;
+      let ev; try { ev = JSON.parse(s); } catch (e) { continue; }
+      if (!ev || typeof ev !== 'object' || SKIP_TYPES.has(ev.type)) continue;
+      events.push(ev);
+    }
+    events.sort((a, b) => String(a.timestamp || a._audit_timestamp || '')
+      .localeCompare(String(b.timestamp || b._audit_timestamp || '')));
+    const turns = []; let openMsg = {};
+    for (const ev of events) {
+      const ts = ev.timestamp || ev._audit_timestamp || '';
+      if (ev.type === 'user') {
+        if (!isRealUserTurn(ev)) continue;
+        const t = stripNoise(blocksToText((ev.message || {}).content));
+        if (t) { turns.push({ role: 'You', text: t, ts }); openMsg = {}; }
+      } else if (ev.type === 'assistant') {
+        const msg = ev.message || {};
+        const t = blocksToText(msg.content).trim();
+        if (!t) continue;
+        const mid = msg.id;
+        if (mid && openMsg[mid] !== undefined) {
+          const prev = turns[openMsg[mid]];
+          if (!prev.text.includes(t)) prev.text += '\n' + t;
+        } else {
+          turns.push({ role: 'Claude', text: t, ts });
+          if (mid) openMsg[mid] = turns.length - 1;
         }
-        const rest = rawLines.filter((l, li) => li !== tagIdx).join("\n").trim();
-        entries.push({ kind:'claude', num:num, tagged: !!tldr,
-                       tldr: tldr || (rawLines.find(l=>l.trim())||'').slice(0,120) || '(empty)',
-                       body: rest || null });
+      }
+    }
+    return turns;
+  }
+  function turnsToEntries(turns) {
+    const entries = []; let turnNo = 0;
+    for (const t of turns) {
+      if (t.role === 'You') {
+        turnNo++;
+        const firstLine = t.text.split(/\n/).find(l => l.trim()) || '';
+        const short = t.text.length <= 300 && !t.text.includes('\n\n');
+        entries.push({ kind: 'user', num: String(turnNo),
+                       tldr: short ? t.text : firstLine.slice(0, 160) + ' ...',
+                       body: short ? null : t.text });
+      } else {
+        const lines = t.text.split(/\n/);
+        let tldr = null, num = String(Math.max(turnNo, 1)), tagIdx = -1;
+        for (let i = 0; i < lines.length; i++) {
+          const m = lines[i].match(TAG_RE);
+          if (m && m[2] && m[2].trim()) {
+            tldr = m[2].replace(/\**$/, '').trim(); if (m[1]) num = m[1]; tagIdx = i; break;
+          }
+        }
+        const rest = lines.filter((l, i) => i !== tagIdx).join('\n').trim();
+        entries.push({ kind: 'claude', num, tagged: !!tldr,
+                       tldr: tldr || (lines.find(l => l.trim()) || '(empty)').slice(0, 120),
+                       body: rest || t.text });
       }
     }
     return entries;
   }
 
-  function parseFlat(text) {
-    const lines = text.split(/\r?\n/);
-    const raw = []; let cur = null;
-    for (const line of lines) {
-      const m = line.match(TAG_RE);
-      if (m && m[2] && m[2].trim()) {
-        if (cur) raw.push(cur);
-        cur = { num:m[1], tldr:m[2].replace(/\**$/,'').trim(), body:[], tagged:true };
-      } else {
-        if (!cur) cur = { num:null, tldr:null, body:[], tagged:false };
-        cur.body.push(line);
+  // ================= session discovery =================
+  async function scanSessions(dir) {
+    const found = [];
+    async function walk(handle, path, depth) {
+      if (depth > 8) return;
+      let it;
+      try { it = handle.entries(); } catch (e) { return; }
+      for await (const [name, h] of it) {
+        try {
+          if (h.kind === 'file') {
+            if (name === 'audit.jsonl') {
+              const f = await h.getFile();
+              found.push({ handle: h, path: path, mtime: f.lastModified, size: f.size, title: null });
+            }
+          } else if (h.kind === 'directory' && !SKIP_DIRS.has(name) ) {
+            await walk(h, path + '/' + name, depth + 1);
+          }
+        } catch (e) { /* unreadable entry - skip */ }
       }
     }
-    if (cur) raw.push(cur);
-    const out = [];
-    for (const e of raw) {
-      const bodyText = e.body.join("\n").trim();
-      if (!e.tagged) {
-        if (!bodyText) continue;
-        if (out.length && bodyText.length < UNTAGGED_MIN_CHARS) {
-          out[out.length-1].body += "\n\n" + bodyText; continue;
+    await walk(dir, '', 0);
+    found.sort((a, b) => b.mtime - a.mtime);
+    return found.slice(0, MAX_SESSIONS);
+  }
+  async function sessionTitle(item) {
+    try {
+      const f = await item.handle.getFile();
+      const text = await f.slice(0, TITLE_SLICE).text();
+      const lines = text.split('\n');
+      if (f.size > TITLE_SLICE) lines.pop();      // last line may be truncated
+      for (const line of lines) {
+        const s = line.trim();
+        if (!s) continue;
+        let ev; try { ev = JSON.parse(s); } catch (e) { continue; }
+        if (isRealUserTurn(ev)) {
+          let t = stripNoise(blocksToText((ev.message || {}).content));
+          t = t.split(/\s+/).join(' ');
+          return t.length > 80 ? t.slice(0, 80) + '...' : t;
         }
-        e.tldr = (bodyText.split(/\n/).find(l=>l.trim())||'(untagged)').trim().slice(0,120);
-        out.push({ kind:'claude', num:null, tagged:false, tldr:e.tldr, body:bodyText });
-      } else {
-        out.push({ kind:'claude', num:e.num, tagged:true, tldr:e.tldr, body:bodyText });
       }
-    }
-    return out;
+    } catch (e) { /* fall through */ }
+    return null;
   }
 
-  // ================= merge =================
-  function absorbOriginals(flatEntries) {
-    let added = 0;
-    for (const e of flatEntries) {
-      if (e.tagged && e.num && e.body && e.body.trim()) {
-        originalsCache[e.num] = e.body; added++;
-      }
-    }
-    return added;
+  // ================= session list view =================
+  function fmtWhen(ms) {
+    const d = new Date(ms), now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return sameDay ? hm : d.toLocaleDateString([], { day: '2-digit', month: '2-digit' }) + ' ' + hm;
   }
-
-  // ================= rendering =================
-  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-  function renderBody(text) {
-    if (!text) return "";
-    const parts = String(text).split(/```/);
-    let html = "";
-    parts.forEach((p, i) => {
-      html += (i % 2 === 1)
-        ? '<span class="fence">' + esc(p.replace(/^[a-z]*\n/,'')) + '</span>'
-        : esc(p);
-    });
-    return html;
-  }
-
-  function render() {
-    const box = document.getElementById('entries');
-    if (!entriesState.length) {
-      box.innerHTML = '<p class="empty-note">Nothing parseable found.</p>'; return;
+  function renderSessionList() {
+    const box = document.getElementById('sessions');
+    if (!sessionList.length) {
+      box.innerHTML = '<p class="empty-note">No conversations found in this folder. Pick the Claude session store itself (see paths above).</p>';
+      return;
     }
-    let synced = 0, claudeCount = 0;
-    box.innerHTML = entriesState.map((e, i) => {
-      let body = e.body, stub = false;
-      if (e.kind === 'claude') {
-        claudeCount++;
-        if (!body && e.num && originalsCache[e.num]) body = originalsCache[e.num];
-        if (body) synced++; else stub = true;
-      }
-      const expandable = e.kind === 'claude' || !!body;
-      const num = e.kind === 'user' ? 'you' + (e.num ? ' · '+e.num : '')
-                : e.tagged === false ? 'untagged' : '#'+(e.num || '?');
-      const fullHtml = body ? renderBody(body)
-        : '<span class="stub-note">Original not synced yet - select-all + copy the chat, then paste here (or enable clipboard on focus and alt-tab back).</span>';
-      return `
-      <article class="entry ${e.kind} ${e.tagged===false?'untagged':''} ${expandable?'expandable':''} ${stub?'stub':''}" id="e${i}">
-        <div class="entry-head" ${expandable?'onclick="toggleEntry(this.parentElement)"':''}>
-          <span class="entry-num">${num}</span>
-          <span class="entry-tldr">${esc(e.tldr || '')}</span>
-          ${expandable?'<span class="entry-state"></span>':''}
-        </div>
-        ${expandable?`<div class="entry-full"><div class="original">${fullHtml}</div></div>`:''}
-      </article>`;
-    }).join("");
-    const u = entriesState.filter(e=>e.kind==='user').length;
+    box.innerHTML = '<p class="list-note">' + sessionList.length + ' conversations, newest first - click one to open</p>'
+      + sessionList.map((s, i) => {
+        const active = Date.now() - s.mtime < ACTIVE_MS;
+        const title = s.title === null ? 'reading title...' : (s.title || '(no user message yet)');
+        return `
+        <div class="session" onclick="openSession(${i})">
+          <span class="s-title ${s.title ? '' : 'untitled'}">${esc(title)}</span>
+          ${active ? '<span class="s-active">&#9679; ACTIVE</span>' : ''}
+          <span class="s-meta">${fmtWhen(s.mtime)} &middot; ${(s.size / 1048576).toFixed(1)} MB</span>
+        </div>`;
+      }).join('');
+  }
+  async function refreshSessions(rescan) {
+    if (!rootHandle) return;
     const st = document.getElementById('status');
-    st.textContent = `${claudeCount} responses (${synced} originals synced) · ${u} of your messages · ${sourceLabel} · ${new Date().toLocaleTimeString()}`;
-    st.classList.toggle('live', sourceLabel.startsWith('live'));
-    document.getElementById('dropzone').classList.add('compact');
-    cursor = -1;
-  }
-
-  function ingest(text, label) {
-    if (!text || !text.trim()) return;
-    if (SPEAK_RE.test(text)) {
-      const parsed = parseMirror(text);
-      const isOriginals = /^#\s*Chat Originals/im.test(text) || (label||'').includes('originals');
-      if (isOriginals) {
-        for (const e of parsed) {
-          if (e.kind === 'claude' && e.num && e.body) originalsCache[e.num] = e.body;
+    try {
+      if (rescan || !sessionList.length) {
+        const fresh = await scanSessions(rootHandle);
+        // keep already-resolved titles for unchanged files
+        for (const s of fresh) {
+          const old = sessionList.find(o => o.path === s.path);
+          if (old && old.mtime === s.mtime) s.title = old.title;
         }
-        if (!entriesState.length) { entriesState = parsed; sourceLabel = label || 'originals'; }
-      } else {
-        entriesState = parsed;
-        sourceLabel = label || 'mirror';
+        sessionList = fresh;
       }
-    } else {
-      // flat chat copy: primarily a source of originals
-      const flat = parseFlat(text);
-      const added = absorbOriginals(flat);
-      if (!entriesState.length || added === 0) {
-        // no skeleton yet (or nothing merged): show flat standalone
-        entriesState = flat.map(e => ({...e}));
-        sourceLabel = label || 'pasted chat';
+      renderSessionList();
+      st.textContent = sessionList.length + ' conversations - ' + new Date().toLocaleTimeString();
+      st.classList.add('live');
+      // resolve missing titles lazily, re-render as they arrive
+      for (const s of sessionList) {
+        if (s.title === null) {
+          s.title = (await sessionTitle(s)) || '';
+          if (view === 'sessions') renderSessionList();
+        }
       }
+    } catch (e) {
+      st.textContent = 'lost access to the sessions folder - reconnect';
+      st.classList.remove('live');
     }
-    render();
+  }
+  function showSessionList() {
+    view = 'sessions';
+    current = null;
+    clearInterval(chatTimer);
+    document.getElementById('entries').innerHTML = '';
+    document.getElementById('backBtn').style.display = 'none';
+    document.getElementById('sessions').style.display = '';
+    document.getElementById('hintBar').style.display = 'none';
+    refreshSessions(true);
+    clearInterval(listTimer);
+    listTimer = setInterval(() => { if (view === 'sessions') refreshSessions(true); }, 15000);
   }
 
-  // ================= live mode: folder (preferred) or single file =================
-  let dirHandle = null, fileHandle = null, pollTimer = null, storedHandle = null;
-  const lastMods = {};
+  // ================= chat view =================
+  async function openSession(i) {
+    current = sessionList[i];
+    if (!current) return;
+    view = 'chat';
+    currentMod = 0;
+    document.getElementById('sessions').style.display = 'none';
+    document.getElementById('backBtn').style.display = '';
+    document.getElementById('hintBar').style.display = '';
+    clearInterval(listTimer);
+    await pollChat(true);
+    clearInterval(chatTimer);
+    chatTimer = setInterval(() => pollChat(false), 2000);
+  }
+  async function pollChat(force) {
+    if (!current) return;
+    try {
+      const f = await current.handle.getFile();
+      if (!force && f.lastModified === currentMod) return;
+      currentMod = f.lastModified;
+      const turns = parseAudit(await f.text());
+      entriesState = turnsToEntries(turns);
+      sourceLabel = 'live · ' + (current.title || 'session');
+      render();
+    } catch (e) {
+      const st = document.getElementById('status');
+      st.textContent = 'lost access - reconnect';
+      st.classList.remove('live');
+    }
+  }
 
-  // -- tiny IndexedDB store so the folder survives reloads --
+  // ================= folder connection + persistence =================
   function idb() {
     return new Promise((res, rej) => {
       const r = indexedDB.open('tldr-viewer', 1);
@@ -271,28 +367,19 @@
   async function saveHandle(h) {
     try {
       const db = await idb();
-      db.transaction('handles', 'readwrite').objectStore('handles').put(h, 'dir');
-    } catch (e) { /* private mode etc. - persistence is best-effort */ }
+      db.transaction('handles', 'readwrite').objectStore('handles').put(h, 'root');
+    } catch (e) { /* best effort */ }
   }
   async function loadHandle() {
     try {
       const db = await idb();
       return await new Promise((res, rej) => {
-        const rq = db.transaction('handles').objectStore('handles').get('dir');
+        const rq = db.transaction('handles').objectStore('handles').get('root');
         rq.onsuccess = () => res(rq.result || null);
         rq.onerror = () => rej(rq.error);
       });
     } catch (e) { return null; }
   }
-
-  function startPolling() {
-    clearInterval(pollTimer);
-    pollOnce(true);
-    pollTimer = setInterval(pollOnce, 2000);
-  }
-
-  // on load: silently resume if the browser still trusts the stored handle,
-  // otherwise turn the button into a one-click reconnect
   (async function resume() {
     if (location.protocol === 'file:' || !window.indexedDB) return;
     storedHandle = await loadHandle();
@@ -300,143 +387,197 @@
     try {
       const p = await storedHandle.queryPermission({ mode: 'read' });
       if (p === 'granted') {
-        dirHandle = storedHandle;
-        document.getElementById('connectBtn').textContent = 'connected (' + storedHandle.name + ')';
-        startPolling();
+        rootHandle = storedHandle;
+        connected();
       } else {
         document.getElementById('connectBtn').textContent = 'reconnect: ' + storedHandle.name;
       }
-    } catch (e) { /* stale handle - normal picker path applies */ }
+    } catch (e) { /* stale handle */ }
   })();
-
-  async function connectFile() {
+  function connected() {
+    document.getElementById('connectBtn').textContent = 'connected (' + rootHandle.name + ')';
+    document.getElementById('dropzone').classList.add('compact');
+    showSessionList();
+  }
+  async function connectSessions() {
     const st = document.getElementById('status');
     if (location.protocol === 'file:') {
-      st.textContent = 'folder access is blocked on file:// - run "python -m http.server 8000" in this folder and open http://localhost:8000/tldr-viewer.html (or just paste a chat here)';
+      st.textContent = 'folder access is blocked on file:// - open the hosted viewer or run a local server (or just paste a chat)';
       return;
     }
-    // one-click path: re-authorize the remembered folder (needs this user gesture)
-    if (storedHandle && !dirHandle) {
+    if (storedHandle && !rootHandle) {
       try {
         const p = await storedHandle.requestPermission({ mode: 'read' });
-        if (p === 'granted') {
-          dirHandle = storedHandle;
-          document.getElementById('connectBtn').textContent = 'connected (' + storedHandle.name + ')';
-          startPolling();
-          return;
-        }
-      } catch (e) { /* fall through to a fresh pick */ }
+        if (p === 'granted') { rootHandle = storedHandle; connected(); return; }
+      } catch (e) { /* fall through */ }
       storedHandle = null;
     }
-    if (window.showDirectoryPicker) {
-      try {
-        dirHandle = await window.showDirectoryPicker();
-        saveHandle(dirHandle);
-        storedHandle = dirHandle;
-        document.getElementById('connectBtn').textContent = 'connected (' + dirHandle.name + ')';
-        startPolling();
-        return;
-      } catch (e) {
-        if (e && e.name === 'AbortError') { st.textContent = 'folder pick cancelled'; return; }
-        st.textContent = 'folder picker failed (' + (e && e.name || e) + ') - trying single file...';
-      }
-    } else {
-      st.textContent = 'this browser has no folder picker (Chrome/Edge needed) - trying single file...';
-    }
-    if (!window.showOpenFilePicker) {
-      st.textContent = 'no File System Access API here - use paste (Ctrl+V) or Chrome/Edge on localhost';
+    if (!window.showDirectoryPicker) {
+      st.textContent = 'this browser has no folder picker (Chrome/Edge needed) - paste a chat instead (Ctrl+V)';
       return;
     }
     try {
-      [fileHandle] = await window.showOpenFilePicker({
-        types: [{ description:'Markdown', accept:{'text/markdown':['.md'],'text/plain':['.txt','.md']} }]
-      });
-      document.getElementById('connectBtn').textContent = 'connected (file)';
-      startPolling();
+      rootHandle = await window.showDirectoryPicker();
+      saveHandle(rootHandle);
+      storedHandle = rootHandle;
+      connected();
     } catch (e) {
       st.textContent = (e && e.name === 'AbortError')
-        ? 'file pick cancelled'
-        : 'file picker failed: ' + (e && e.name || e) + ' - paste the chat instead (Ctrl+V)';
+        ? 'folder pick cancelled'
+        : 'folder picker failed (' + (e && e.name || e) + ') - paste a chat instead (Ctrl+V)';
     }
   }
 
-  async function readIfChanged(handle, key, force) {
-    const f = await handle.getFile();
-    if (!force && f.lastModified === lastMods[key]) return null;
-    lastMods[key] = f.lastModified;
-    return await f.text();
+  // ================= rendering =================
+  function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  function renderBody(text) {
+    if (!text) return "";
+    const parts = String(text).split(/```/);
+    let html = "";
+    parts.forEach((p, i) => {
+      html += (i % 2 === 1)
+        ? '<span class="fence">' + esc(p.replace(/^[a-z]*\n/, '')) + '</span>'
+        : esc(p);
+    });
+    return html;
+  }
+  function render() {
+    const box = document.getElementById('entries');
+    if (!entriesState.length) {
+      box.innerHTML = '<p class="empty-note">Nothing parseable found.</p>'; return;
+    }
+    let claudeCount = 0;
+    box.innerHTML = entriesState.map((e, i) => {
+      if (e.kind === 'claude') claudeCount++;
+      const expandable = !!e.body;
+      const num = e.kind === 'user' ? 'you · ' + (e.num || '?')
+                : e.tagged === false ? 'untagged' : '#' + (e.num || '?');
+      return `
+      <article class="entry ${e.kind} ${e.tagged === false ? 'untagged' : ''} ${expandable ? 'expandable' : ''}" id="e${i}">
+        <div class="entry-head" ${expandable ? 'onclick="toggleEntry(this.parentElement)"' : ''}>
+          <span class="entry-num">${num}</span>
+          <span class="entry-tldr">${esc(e.tldr || '')}</span>
+          ${expandable ? '<span class="entry-state"></span>' : ''}
+        </div>
+        ${expandable ? `<div class="entry-full"><div class="original">${renderBody(e.body)}</div></div>` : ''}
+      </article>`;
+    }).join("");
+    const u = entriesState.filter(e => e.kind === 'user').length;
+    const st = document.getElementById('status');
+    st.textContent = `${claudeCount} responses · ${u} of your messages · ${sourceLabel} · ${new Date().toLocaleTimeString()}`;
+    st.classList.toggle('live', sourceLabel.startsWith('live'));
+    document.getElementById('dropzone').classList.add('compact');
+    cursor = -1;
   }
 
-  async function pollOnce(force) {
-    try {
-      if (dirHandle) {
-        // originals first so a fresh skeleton render already has the cache
-        try {
-          const h = await dirHandle.getFileHandle('chat-originals.md');
-          const t = await readIfChanged(h, 'originals', force);
-          if (t && t.trim()) ingest(t, 'live originals');
-        } catch (e) { /* file not there yet */ }
-        try {
-          const h = await dirHandle.getFileHandle('chat-mirror.md');
-          const t = await readIfChanged(h, 'mirror', force);
-          if (t && t.trim()) ingest(t, 'live · chat-mirror.md');
-        } catch (e) { /* file not there yet */ }
-      } else if (fileHandle) {
-        const t = await readIfChanged(fileHandle, 'single', force);
-        if (t && t.trim()) ingest(t, 'live · file');
+  // ================= paste fallback (mirror files + flat chats) =================
+  function parseMirror(text) {
+    const chunks = text.split(SPLIT_RE);
+    const entries = [];
+    for (let i = 1; i < chunks.length; i += 2) {
+      const head = chunks[i];
+      const body = (chunks[i + 1] || "").trim();
+      const isUser = /You/i.test(head);
+      const turn = (head.match(/turn\s*(\d+)/i) || [])[1] || null;
+      if (isUser) {
+        if (!body) continue;
+        const firstLine = body.split(/\n/).find(l => l.trim()) || "";
+        const short = body.length <= 300 && !body.includes("\n\n");
+        entries.push({ kind: 'user', num: turn, tldr: short ? body : firstLine.slice(0, 160) + ' ...',
+                       body: short ? null : body });
+      } else {
+        const rawLines = body.split(/\n/);
+        let tldr = null, num = turn, tagIdx = -1;
+        for (let li = 0; li < rawLines.length; li++) {
+          const m = rawLines[li].match(TAG_RE);
+          if (m && m[2] && m[2].trim()) { tldr = m[2].replace(/\**$/, '').trim(); num = m[1] || num; tagIdx = li; break; }
+        }
+        const rest = rawLines.filter((l, li) => li !== tagIdx).join("\n").trim();
+        entries.push({ kind: 'claude', num: num, tagged: !!tldr,
+                       tldr: tldr || (rawLines.find(l => l.trim()) || '(empty)').slice(0, 120),
+                       body: rest || null });
       }
-    } catch (e) {
-      document.getElementById('status').textContent = 'lost access - reconnect';
-      document.getElementById('status').classList.remove('live');
     }
+    return entries;
   }
-
-  // ================= fallback ingestion =================
+  function parseFlat(text) {
+    const lines = text.split(/\r?\n/);
+    const raw = []; let cur = null;
+    for (const line of lines) {
+      const m = line.match(TAG_RE);
+      if (m && m[2] && m[2].trim()) {
+        if (cur) raw.push(cur);
+        cur = { num: m[1], tldr: m[2].replace(/\**$/, '').trim(), body: [], tagged: true };
+      } else {
+        if (!cur) cur = { num: null, tldr: null, body: [], tagged: false };
+        cur.body.push(line);
+      }
+    }
+    if (cur) raw.push(cur);
+    const out = [];
+    for (const e of raw) {
+      const bodyText = e.body.join("\n").trim();
+      if (!e.tagged) {
+        if (!bodyText) continue;
+        if (out.length && bodyText.length < 400) {
+          out[out.length - 1].body += "\n\n" + bodyText; continue;
+        }
+        out.push({ kind: 'claude', num: null, tagged: false,
+                   tldr: (bodyText.split(/\n/).find(l => l.trim()) || '(untagged)').trim().slice(0, 120),
+                   body: bodyText });
+      } else {
+        out.push({ kind: 'claude', num: e.num, tagged: true, tldr: e.tldr, body: bodyText });
+      }
+    }
+    return out;
+  }
+  function ingest(text, label) {
+    if (!text || !text.trim()) return;
+    view = 'chat';
+    clearInterval(chatTimer); clearInterval(listTimer);
+    document.getElementById('sessions').style.display = 'none';
+    document.getElementById('backBtn').style.display = rootHandle ? '' : 'none';
+    document.getElementById('hintBar').style.display = '';
+    entriesState = SPEAK_RE.test(text) ? parseMirror(text) : parseFlat(text);
+    sourceLabel = label || 'pasted chat';
+    render();
+  }
   document.addEventListener('paste', e => {
     const t = (e.clipboardData || window.clipboardData).getData('text');
     if (t) { e.preventDefault(); ingest(t, 'pasted'); }
   });
-  let auto = false;
-  function toggleAuto(on) { auto = on; if (on) tryClipboard(); }
-  async function tryClipboard() {
-    try { ingest(await navigator.clipboard.readText(), 'clipboard'); }
-    catch (err) {
-      document.getElementById('status').textContent = 'clipboard blocked - allow access or paste manually';
-    }
-  }
-  window.addEventListener('focus', () => { if (auto) tryClipboard(); });
 
   // ================= interaction =================
-  function toggleEntry(el){ el.classList.toggle('open'); }
-  function setAll(open){ document.querySelectorAll('.entry.expandable').forEach(e=>e.classList.toggle('open',open)); }
-  function doSearch(q){
+  function toggleEntry(el) { el.classList.toggle('open'); }
+  function setAll(open) { document.querySelectorAll('.entry.expandable').forEach(e => e.classList.toggle('open', open)); }
+  function doSearch(q) {
     q = q.trim().toLowerCase();
-    document.querySelectorAll('.entry').forEach(e=>{
-      e.querySelectorAll('mark').forEach(m=>m.replaceWith(m.textContent));
+    document.querySelectorAll('.entry').forEach(e => {
+      e.querySelectorAll('mark').forEach(m => m.replaceWith(m.textContent));
       e.normalize();
-      if(!q){ e.classList.remove('hit-hidden'); return; }
+      if (!q) { e.classList.remove('hit-hidden'); return; }
       const hit = e.textContent.toLowerCase().includes(q);
       e.classList.toggle('hit-hidden', !hit);
-      if(hit && e.classList.contains('expandable') && !e.classList.contains('stub')){
+      if (hit && e.classList.contains('expandable')) {
         e.classList.add('open'); highlight(e, q);
       }
     });
   }
-  function highlight(root, q){
+  function highlight(root, q) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
     const nodes = []; let n;
     while (n = walker.nextNode()) if (n.textContent.toLowerCase().includes(q)) nodes.push(n);
-    nodes.forEach(node=>{
+    nodes.forEach(node => {
       const i = node.textContent.toLowerCase().indexOf(q);
       const range = document.createRange();
       range.setStart(node, i); range.setEnd(node, i + q.length);
       const mark = document.createElement('mark');
-      try { range.surroundContents(mark); } catch(e) {}
+      try { range.surroundContents(mark); } catch (e) {}
     });
   }
   let cursor = -1;
-  function visible(){ return [...document.querySelectorAll('.entry:not(.hit-hidden)')]; }
-  document.addEventListener('keydown', e=>{
+  function visible() { return [...document.querySelectorAll('.entry:not(.hit-hidden)')]; }
+  document.addEventListener('keydown', e => {
     if (/input|textarea/i.test(document.activeElement.tagName)) return;
     const list = visible();
     if (!list.length) return;
@@ -444,68 +585,45 @@
       cursor = Math.min(Math.max(cursor + (e.key === 'j' ? 1 : -1), 0), list.length - 1);
       list.forEach(el => el.classList.remove('focused'));
       list[cursor].classList.add('focused');
-      list[cursor].scrollIntoView({behavior:'smooth', block:'center'});
+      list[cursor].scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
     if (e.key === 't') {
-      const target = list[cursor] || list.find(el=>el.classList.contains('expandable'));
+      const target = list[cursor] || list.find(el => el.classList.contains('expandable'));
       if (target && target.classList.contains('expandable')) toggleEntry(target);
     }
   });
 
   // ================= startup capability check =================
-  (function(){
+  (function () {
     const caps = [];
     caps.push('protocol=' + location.protocol);
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
-    caps.push('filePicker=' + (typeof window.showOpenFilePicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
-    const msg = 'v8 ready · ' + caps.join(' · ');
+    const msg = 'v9 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
-    if (st) st.textContent = msg;
+    if (st && !rootHandle) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);
+    document.getElementById('hintBar').style.display = 'none';
   })();
 
-  // ================= demos =================
-  const DEMO_SKELETON = `# Chat Mirror - TLDR toggle design session
+  // ================= demo =================
+  const DEMO = `> **TL;DR #1:** Problem confirmed: transcript navigation, not answer length. Summaries must live inside the messages; the viewer only filters.
 
-### \u{1F9D1} You - turn 1
-In long conversations it becomes hard to work productively because of walls of text. Navigation becomes difficult.
+The chat stream is append-only prose with no outline, collapse or search. Any derived mirror creates a sync problem - someone must keep it current. Embedding the summary in each message removes that dependency: every copy of the conversation already carries its compact layer.
 
-### \u{1F916} Claude - turn 1
-> **TL;DR #1:** Problem confirmed: transcript navigation, not answer length. Summaries must live inside the messages; the viewer only filters.
+> **TL;DR #2:** v9 removes the CLI entirely: the viewer reads audit.jsonl straight from the Claude session store via the File System Access API.
 
-### \u{1F9D1} You - turn 2
-Is the mirror rewrite token expensive? Doesn't it double generation time?
-
-### \u{1F916} Claude - turn 2
-> **TL;DR #2:** Yes - full rewrite is quadratic. Fix: skeleton mode. Mirror holds only your messages + tag lines; originals merge lazily from a chat copy.
-
-### \u{1F9D1} You - turn 3
-Ok, skeleton + lazy merge it is.
-
-### \u{1F916} Claude - turn 3
-> **TL;DR #3:** Skeleton mode shipped: appends cost ~50 tokens/turn, viewer polls the file live, "not synced" entries fill in after one Ctrl+A copy of the chat.
-`;
-  const DEMO_FLAT = `> **TL;DR #1:** Problem confirmed: transcript navigation, not answer length. Summaries must live inside the messages; the viewer only filters.
-
-The chat stream is append-only prose with no outline, collapse or search. Any derived mirror creates a sync problem - someone must keep it current. Embedding the summary in each message removes that dependency: every copy of the conversation already carries its compact layer. The viewer degenerates from live mirror to filter, which is a much easier component to make reliable.
-
-> **TL;DR #2:** Yes - full rewrite is quadratic. Fix: skeleton mode. Mirror holds only your messages + tag lines; originals merge lazily from a chat copy.
-
-Full accounting: rewriting the whole history each turn means output-per-turn grows with session length - quadratic total, in output tokens, the expensive kind. Skeleton mode drops per-turn overhead to roughly the size of your message plus one tag line (~50-100 tokens). Originals are never generated twice; they are copied, and copying is free.
+bridge.py's parser was ported to JavaScript. The viewer scans the sessions folder, titles each conversation by its first user message, and re-parses the selected session file whenever it changes - the same live behavior, zero setup.
 
 \`\`\`
-per-turn cost: full rewrite  O(n)   -> total O(n^2)
-               append full   ~2x    -> total linear
-               skeleton      ~0     -> total negligible
+v8: audit.jsonl -> bridge.py -> chat-mirror.md -> viewer
+v9: audit.jsonl -> viewer
 \`\`\`
 
-> **TL;DR #3:** Skeleton mode shipped: appends cost ~50 tokens/turn, viewer polls the file live, "not synced" entries fill in after one Ctrl+A copy of the chat.
+> **TL;DR #3:** Everything stays local: folder permission is read-only, per-origin, revocable, and no byte ever leaves the browser.
 
-The merge keys on the tag numbers: pasted flat chat is parsed, each tagged segment's body is cached under its number, and every skeleton entry with a matching number gets its original filled in. The cache persists across live file updates, so one paste back-fills the whole session and stays.`;
-
-  function loadDemo(){ ingest(DEMO_SKELETON, 'demo skeleton'); }
-  function loadDemoMerge(){ ingest(DEMO_FLAT, 'demo merge'); }
+The File System Access API only works on Chrome/Edge over https or localhost, which is why pasting remains as the universal fallback.`;
+  function loadDemo() { ingest(DEMO, 'demo'); }
 </script>
 </body>
 </html>

@@ -15,30 +15,30 @@ a single dependency-free HTML file you can also right-click-save and use offline
 
 ## Two ways to use it
 
-### 1. Paste any chat (works everywhere)
+### 1. Connect the Claude session store (no CLI — v9)
+
+The Claude desktop app writes each session to a local `audit.jsonl`. The viewer
+reads those files directly: click **"connect Claude sessions folder"** once and
+pick the store —
+
+| OS | Path |
+|---|---|
+| Windows | `%APPDATA%\Claude\local-agent-mode-sessions` |
+| macOS | `~/Library/Application Support/Claude/local-agent-mode-sessions` |
+
+The page scans the folder itself, lists every conversation by title (newest
+first, with an ACTIVE badge on running sessions), and follows the one you open
+live — re-parsing on every change. No bridge process, no copying, no extension.
+The viewer remembers the folder: after a reload, reconnecting is one click.
+
+> The folder picker needs Chrome or Edge over https or localhost (the File
+> System Access API is blocked on `file://`). Pasting works in any browser.
+
+### 2. Paste any chat (works everywhere)
 
 Open the viewer, select-all + copy your conversation, paste it into the page.
 It splits the transcript into turns and renders the collapsible map. Works with
 Claude, and with any chat you can copy as text.
-
-### 2. Live mode for Claude Cowork (Windows / macOS)
-
-The Claude desktop app writes each session to a local `audit.jsonl`. `bridge.py`
-reads it and keeps a mirror file updated, so the viewer follows your session in
-real time — no copying, no pasting, no browser extension.
-
-```bash
-cd any-folder-you-like
-python bridge.py            # watch the newest session (--list shows all)
-```
-
-Then open **[the viewer](https://kollegdev.github.io/claudetldr/)**, click
-"connect workspace folder", and pick that same folder. The viewer remembers it:
-after a reload, reconnecting is one click (or automatic). If the folder is a
-git repo, bridge.py adds its output files to your .gitignore by itself.
-
-> The folder picker needs Chrome or Edge on `http://localhost` (the File System
-> Access API is blocked on `file://`). Pasting works in any browser.
 
 ---
 
@@ -46,8 +46,8 @@ git repo, bridge.py adds its output files to your .gitignore by itself.
 
 | Path | What it is |
 |---|---|
-| `index.html` | The viewer. Single file, no dependencies. |
-| `bridge.py` | Tails a Cowork session's `audit.jsonl` → `chat-mirror.md`. |
+| `index.html` | The viewer. Single file, no dependencies. Reads `audit.jsonl` directly. |
+| `bridge.py` | Legacy CLI bridge: tails an `audit.jsonl` → `chat-mirror.md`. Not needed since v9. |
 | `tools/cowork_inspector.py` | Read-only recon: what the Claude app exposes on your machine. |
 | `tools/peek_audit.py` | Prints an `audit.jsonl`'s structure with values redacted. |
 
