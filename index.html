@@ -78,7 +78,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v9.1</span></h1>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v10</span></h1>
     <span class="status" id="status">not connected</span>
   </header>
 
@@ -92,11 +92,12 @@
   </div>
 
   <div id="dropzone">
-    <strong>Drag the folder <code>local-agent-mode-sessions</code> onto this page.</strong><br>
-    Windows: <kbd>Win</kbd>+<kbd>R</kbd> &rarr; <code>%APPDATA%\Claude</code> &nbsp;&middot;&nbsp;
-    macOS: Finder &rarr; <code>~/Library/Application Support/Claude</code><br>
-    (Chrome's folder picker refuses AppData/Library, so the "connect Cowork" button only works for
-    folders outside them - dropping works everywhere. Reconnect after a reload by dropping again.)<br>
+    <strong>Fully automatic (Windows):</strong> double-click <code>setup.bat</code> from the repo once -
+    it installs an invisible sync that mirrors your conversations to <code>Documents\claude-sessions</code>.
+    Then click "connect Cowork", pick that folder once, and the viewer reconnects by itself from then on.<br>
+    <strong>Zero install:</strong> drag <code>local-agent-mode-sessions</code> onto this page
+    (<kbd>Win</kbd>+<kbd>R</kbd> &rarr; <code>%APPDATA%\Claude</code>; macOS: Finder &rarr;
+    <code>~/Library/Application Support/Claude</code>) - re-drop after a reload.<br>
     Nothing leaves your browser. Or paste any copied chat (Ctrl+V) anywhere here.
   </div>
 
@@ -483,7 +484,7 @@
       return;
     }
     try {
-      rootHandle = await window.showDirectoryPicker();
+      rootHandle = await window.showDirectoryPicker({ id: 'claude-sessions', startIn: 'documents' });
       rootEntry = null;
       saveHandle(rootHandle);
       storedHandle = rootHandle;
@@ -666,7 +667,7 @@
     caps.push('protocol=' + location.protocol);
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
-    const msg = 'v9.1 ready · ' + caps.join(' · ');
+    const msg = 'v10 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
     if (st && !rootHandle && !rootEntry) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);

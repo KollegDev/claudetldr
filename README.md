@@ -15,28 +15,32 @@ a single dependency-free HTML file you can also right-click-save and use offline
 
 ## Two ways to use it
 
-### 1. Connect the Claude session store (no CLI — v9)
+### 1. Fully automatic (Windows — v10)
 
-The Claude desktop app writes each session to a local `audit.jsonl`. The viewer
-reads those files directly: **drag the `local-agent-mode-sessions` folder onto
-the page** —
-
-| OS | Where to find it |
-|---|---|
-| Windows | `Win+R` → `%APPDATA%\Claude` |
-| macOS | Finder → `~/Library/Application Support/Claude` |
+Double-click **`setup.bat`** once. It registers an invisible background task
+(PowerShell, no Python, no admin rights) that mirrors every conversation's
+`audit.jsonl` into `Documents\claude-sessions` within ~2 seconds of a change.
+Then open the viewer, click **"connect Cowork"** and pick that folder — once.
+The viewer remembers it and reconnects automatically on every visit.
 
 The page scans the folder itself, lists every conversation by title (newest
 first, with an ACTIVE badge on running sessions), and follows the one you open
-live — re-parsing on every change. No bridge process, no copying, no extension.
+live — re-parsing on every change. `uninstall.bat` removes everything.
 
-> Why drag & drop instead of the picker button? Chrome's File System Access
-> blocklist refuses AppData/Library in the folder picker *and* for dropped
-> FSA handles — but the legacy `webkitGetAsEntry` drop API reads those folders
-> fine, including live re-reads. The "connect Cowork" button still works for
-> folders outside AppData and is remembered across reloads; dropped folders
-> must be re-dropped after a reload (legacy entries can't be persisted).
-> Chrome/Edge required; pasting works in any browser.
+> Why the mirror folder? Chrome's File System Access blocklist hard-refuses
+> AppData/Library — in the folder picker, for dropped FSA handles, and even
+> through junctions (all three verified). A browser page can never read the
+> store directly and persistently; a one-time invisible sync is the minimum
+> that makes "automatic" possible.
+
+### 1b. Zero install: drag & drop
+
+No setup at all: drag the `local-agent-mode-sessions` folder onto the page
+(Windows: `Win+R` → `%APPDATA%\Claude`; macOS: Finder →
+`~/Library/Application Support/Claude`). The legacy drop API reads folders the
+picker refuses, including live re-reads — but dropped folders can't be
+remembered, so re-drop after each reload. Chrome/Edge required; pasting works
+in any browser.
 
 ### 2. Paste any chat (works everywhere)
 
@@ -51,6 +55,9 @@ Claude, and with any chat you can copy as text.
 | Path | What it is |
 |---|---|
 | `index.html` | The viewer. Single file, no dependencies. Reads `audit.jsonl` directly. |
+| `setup.bat` / `uninstall.bat` | One-time install/removal of the invisible sync service (Windows). |
+| `tools/sync-service.ps1` | The sync service: mirrors `audit.jsonl` files to `Documents\claude-sessions`. |
+| `tools/run-hidden.vbs` | Starts the sync service without a console window. |
 | `bridge.py` | Legacy CLI bridge: tails an `audit.jsonl` → `chat-mirror.md`. Not needed since v9. |
 | `tools/cowork_inspector.py` | Read-only recon: what the Claude app exposes on your machine. |
 | `tools/peek_audit.py` | Prints an `audit.jsonl`'s structure with values redacted. |
