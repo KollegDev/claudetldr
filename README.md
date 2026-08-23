@@ -28,16 +28,14 @@ reads it and keeps a mirror file updated, so the viewer follows your session in
 real time — no copying, no pasting, no browser extension.
 
 ```bash
-python bridge.py --list     # show recent sessions
-python bridge.py            # watch the newest one
+cd any-folder-you-like
+python bridge.py            # watch the newest session (--list shows all)
 ```
 
-Then serve the viewer and connect it to the output folder:
-
-```bash
-python -m http.server 8000
-# open http://localhost:8000/  ->  "connect workspace folder"
-```
+Then open **[the viewer](https://kollegdev.github.io/claudetldr/)**, click
+"connect workspace folder", and pick that same folder. The viewer remembers it:
+after a reload, reconnecting is one click (or automatic). If the folder is a
+git repo, bridge.py adds its output files to your .gitignore by itself.
 
 > The folder picker needs Chrome or Edge on `http://localhost` (the File System
 > Access API is blocked on `file://`). Pasting works in any browser.

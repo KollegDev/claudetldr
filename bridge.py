@@ -20,7 +20,7 @@ import sys
 import time
 from datetime import datetime
 
-DEFAULT_OUT = os.path.join(os.path.expanduser("~"), "claude-mirror")
+DEFAULT_OUT = None  # resolved to the current working directory at runtime
 SKIP_TYPES = {"system", "command_lifecycle", "rate_limit_event",
               "tool_progress", "result"}
 
@@ -159,21 +159,87 @@ def write_mirror(path, text):
     os.replace(tmp, path)
 
 
+
+def guard_gitignore(out_dir):
+    """Append mirror outputs to an existing .gitignore; never create one."""
+    gi = os.path.join(out_dir, ".gitignore")
+    if not os.path.isfile(gi):
+        return
+    try:
+        with open(gi, encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        missing = [p for p in ("chat-mirror.md", "chat-originals.md")
+                   if p not in content]
+        if missing:
+            with open(gi, "a", encoding="utf-8") as f:
+                f.write("\n# claudetldr runtime output (added by bridge.py)\n")
+                for p in missing:
+                    f.write(p + "\n")
+            print("added %s to .gitignore" % ", ".join(missing))
+    except Exception:
+        pass
+
+
+def session_title(path, max_lines=400):
+    """First real user message = the session's natural title."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f):
+                if i > max_lines:
+                    break
+                try:
+                    ev = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(ev, dict) and is_real_user_turn(ev):
+                    text = blocks_to_text((ev.get("message") or {}).get("content"))
+                    text = " ".join(text.split())
+                    return (text[:70] + "...") if len(text) > 70 else text
+    except Exception:
+        pass
+    return "(no user message found)"
+
+
+def pick_session(files):
+    """Interactive menu over recent sessions, newest first. Enter = newest."""
+    now = time.time()
+    top = files[:8]
+    print("Which conversation? (Enter = newest)\n")
+    for i, p in enumerate(top, 1):
+        mt = os.path.getmtime(p)
+        active = "  [ACTIVE]" if now - mt < 300 else ""
+        print("  %d) %s  %5.1f MB%s" % (
+            i, datetime.fromtimestamp(mt).strftime("%d.%m %H:%M"),
+            os.path.getsize(p) / 1048576, active))
+        print("     %s" % session_title(p))
+    try:
+        choice = input("\n> ").strip()
+    except EOFError:
+        choice = ""
+    if choice.isdigit() and 1 <= int(choice) <= len(top):
+        return top[int(choice) - 1]
+    return top[0]
+
+
 # --------------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--file", help="specific audit.jsonl")
-    ap.add_argument("--out", default=DEFAULT_OUT, help="output folder")
+    ap.add_argument("--out", default=DEFAULT_OUT,
+                    help="output folder (default: the folder you run this in)")
     ap.add_argument("--once", action="store_true", help="one snapshot, then exit")
     ap.add_argument("--list", action="store_true", help="list recent sessions")
     ap.add_argument("--interval", type=float, default=2.0, help="poll seconds")
+    ap.add_argument("--latest", action="store_true",
+                    help="skip the menu, take the newest session")
     args = ap.parse_args()
 
     if args.list:
         for p in find_audits()[:10]:
-            print("%s  %8.1f MB  %s" % (
+            print("%s  %7.1f MB  %s" % (
                 datetime.fromtimestamp(os.path.getmtime(p)).strftime("%Y-%m-%d %H:%M"),
-                os.path.getsize(p) / 1048576, p))
+                os.path.getsize(p) / 1048576, session_title(p)))
+            print("%s%s" % (" " * 24, p))
         return
 
     path = args.file
@@ -181,13 +247,19 @@ def main():
         found = find_audits()
         if not found:
             sys.exit("no audit.jsonl found - is the Claude desktop app installed?")
-        path = found[0]
+        if args.latest or len(found) == 1 or not sys.stdin.isatty():
+            path = found[0]
+        else:
+            path = pick_session(found)
+    print("session  : %s" % session_title(path))
 
-    os.makedirs(args.out, exist_ok=True)
-    out_file = os.path.join(args.out, "chat-mirror.md")
+    out_dir = os.path.abspath(args.out or os.getcwd())
+    os.makedirs(out_dir, exist_ok=True)
+    guard_gitignore(out_dir)
+    out_file = os.path.join(out_dir, "chat-mirror.md")
     print("watching : %s" % path)
     print("writing  : %s" % out_file)
-    print("connect the tldr viewer to: %s\n" % args.out)
+    print("connect the tldr viewer to this folder: %s\n" % out_dir)
 
     last_size, last_written = -1, ""
     while True:
