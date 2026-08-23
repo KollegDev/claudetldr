@@ -9,7 +9,9 @@
 # Installed by setup.bat as a hidden logon task. ~0 CPU while idle.
 
 $src = Join-Path $env:APPDATA 'Claude\local-agent-mode-sessions'
-$dst = Join-Path $env:USERPROFILE 'Documents\claude-sessions'
+# Downloads, not Documents: Chrome's picker refuses Documents children on
+# OneDrive-redirected setups ('contains system files'), Downloads works.
+$dst = Join-Path $env:USERPROFILE 'Downloads\claude-sessions'
 
 # single instance guard
 $created = $false

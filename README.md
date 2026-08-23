@@ -19,7 +19,7 @@ a single dependency-free HTML file you can also right-click-save and use offline
 
 Double-click **`setup.bat`** once. It registers an invisible background task
 (PowerShell, no Python, no admin rights) that mirrors every conversation's
-`audit.jsonl` into `Documents\claude-sessions` within ~2 seconds of a change.
+`audit.jsonl` into `Downloads\claude-sessions` within ~2 seconds of a change.
 Then open the viewer, click **"connect Cowork"** and pick that folder — once.
 The viewer remembers it and reconnects automatically on every visit.
 
@@ -56,7 +56,7 @@ Claude, and with any chat you can copy as text.
 |---|---|
 | `index.html` | The viewer. Single file, no dependencies. Reads `audit.jsonl` directly. |
 | `setup.bat` / `uninstall.bat` | One-time install/removal of the invisible sync service (Windows). |
-| `tools/sync-service.ps1` | The sync service: mirrors `audit.jsonl` files to `Documents\claude-sessions`. |
+| `tools/sync-service.ps1` | The sync service: mirrors `audit.jsonl` files to `Downloads\claude-sessions`. |
 | `tools/run-hidden.vbs` | Starts the sync service without a console window. |
 | `bridge.py` | Legacy CLI bridge: tails an `audit.jsonl` → `chat-mirror.md`. Not needed since v9. |
 | `tools/cowork_inspector.py` | Read-only recon: what the Claude app exposes on your machine. |

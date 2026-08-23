@@ -93,7 +93,7 @@
 
   <div id="dropzone">
     <strong>Fully automatic (Windows):</strong> double-click <code>setup.bat</code> from the repo once -
-    it installs an invisible sync that mirrors your conversations to <code>Documents\claude-sessions</code>.
+    it installs an invisible sync that mirrors your conversations to <code>Downloads\claude-sessions</code>.
     Then click "connect Cowork", pick that folder once, and the viewer reconnects by itself from then on.<br>
     <strong>Zero install:</strong> drag <code>local-agent-mode-sessions</code> onto this page
     (<kbd>Win</kbd>+<kbd>R</kbd> &rarr; <code>%APPDATA%\Claude</code>; macOS: Finder &rarr;
@@ -484,7 +484,7 @@
       return;
     }
     try {
-      rootHandle = await window.showDirectoryPicker({ id: 'claude-sessions', startIn: 'documents' });
+      rootHandle = await window.showDirectoryPicker({ id: 'claude-sessions', startIn: 'downloads' });
       rootEntry = null;
       saveHandle(rootHandle);
       storedHandle = rootHandle;
