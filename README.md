@@ -18,21 +18,25 @@ a single dependency-free HTML file you can also right-click-save and use offline
 ### 1. Connect the Claude session store (no CLI — v9)
 
 The Claude desktop app writes each session to a local `audit.jsonl`. The viewer
-reads those files directly: click **"connect Cowork"** once and pick the
-store —
+reads those files directly: **drag the `local-agent-mode-sessions` folder onto
+the page** —
 
-| OS | Path |
+| OS | Where to find it |
 |---|---|
-| Windows | `%APPDATA%\Claude\local-agent-mode-sessions` |
-| macOS | `~/Library/Application Support/Claude/local-agent-mode-sessions` |
+| Windows | `Win+R` → `%APPDATA%\Claude` |
+| macOS | Finder → `~/Library/Application Support/Claude` |
 
 The page scans the folder itself, lists every conversation by title (newest
 first, with an ACTIVE badge on running sessions), and follows the one you open
 live — re-parsing on every change. No bridge process, no copying, no extension.
-The viewer remembers the folder: after a reload, reconnecting is one click.
 
-> The folder picker needs Chrome or Edge over https or localhost (the File
-> System Access API is blocked on `file://`). Pasting works in any browser.
+> Why drag & drop instead of the picker button? Chrome's File System Access
+> blocklist refuses AppData/Library in the folder picker *and* for dropped
+> FSA handles — but the legacy `webkitGetAsEntry` drop API reads those folders
+> fine, including live re-reads. The "connect Cowork" button still works for
+> folders outside AppData and is remembered across reloads; dropped folders
+> must be re-dropped after a reload (legacy entries can't be persisted).
+> Chrome/Edge required; pasting works in any browser.
 
 ### 2. Paste any chat (works everywhere)
 

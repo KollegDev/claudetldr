@@ -16,13 +16,14 @@
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
          font:15px/1.6 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  body.dragging { outline:3px dashed var(--accent); outline-offset:-3px; }
   .wrap { max-width:860px; margin:0 auto; padding:1.5rem 1rem 3rem; }
   header { display:flex; flex-wrap:wrap; gap:.75rem; align-items:center; justify-content:space-between; margin-bottom:.5rem; }
   h1 { font-size:1.2rem; margin:0; letter-spacing:-.01em; }
   .status { font-size:.78rem; color:var(--muted); }
   .status.live::before { content:"\25CF "; color:var(--live); }
   .controls { display:flex; gap:.5rem; flex-wrap:wrap; margin:.75rem 0 1.25rem; }
-  .controls button, .controls input, .controls label.chk {
+  .controls button, .controls input {
     font:inherit; font-size:.83rem; border:1px solid var(--line); border-radius:8px;
     background:var(--card); color:var(--ink); padding:.4rem .8rem;
   }
@@ -30,7 +31,6 @@
   .controls button:hover { border-color:var(--accent); color:var(--accent); }
   .controls button.primary { border-color:var(--accent); color:var(--accent); font-weight:600; }
   .controls input[type=search] { flex:1; min-width:170px; }
-  .controls label.chk { display:inline-flex; align-items:center; gap:.4rem; cursor:pointer; user-select:none; }
   #dropzone { border:2px dashed var(--line); border-radius:14px; padding:2rem 1.5rem;
     text-align:center; color:var(--muted); background:var(--card); margin-bottom:1rem; font-size:.9rem; }
   #dropzone strong { color:var(--ink); }
@@ -78,7 +78,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v9</span></h1>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v9.1</span></h1>
     <span class="status" id="status">not connected</span>
   </header>
 
@@ -92,9 +92,11 @@
   </div>
 
   <div id="dropzone">
-    <strong>Connect Cowork</strong> and pick
-    <code>%APPDATA%\Claude\local-agent-mode-sessions</code>
-    (macOS: <code>~/Library/Application Support/Claude/local-agent-mode-sessions</code>).<br>
+    <strong>Drag the folder <code>local-agent-mode-sessions</code> onto this page.</strong><br>
+    Windows: <kbd>Win</kbd>+<kbd>R</kbd> &rarr; <code>%APPDATA%\Claude</code> &nbsp;&middot;&nbsp;
+    macOS: Finder &rarr; <code>~/Library/Application Support/Claude</code><br>
+    (Chrome's folder picker refuses AppData/Library, so the "connect Cowork" button only works for
+    folders outside them - dropping works everywhere. Reconnect after a reload by dropping again.)<br>
     Nothing leaves your browser. Or paste any copied chat (Ctrl+V) anywhere here.
   </div>
 
@@ -109,7 +111,7 @@
   const SPEAK_RE = /^###\s*(?:\u{1F9D1}|\u{1F916})\s*(You|Claude)[^\n]*$/imu;
   const SPLIT_RE = /^(###\s*(?:\u{1F9D1}|\u{1F916})\s*(?:You|Claude)[^\n]*)$/mu;
   const SKIP_TYPES = new Set(['system','command_lifecycle','rate_limit_event','tool_progress','result']);
-  const SKIP_DIRS  = new Set(['node_modules','.git']);
+  const SKIP_DIRS  = new Set(['node_modules','.git','outputs','uploads','.claude']);
   const TITLE_SLICE = 262144;      // bytes read per file for title extraction
   const ACTIVE_MS   = 5 * 60 * 1000;
   const MAX_SESSIONS = 30;
@@ -117,10 +119,12 @@
   let view = 'sessions';           // 'sessions' | 'chat'
   let entriesState = [];
   let sourceLabel = "";
-  let rootHandle = null, storedHandle = null;
-  let sessionList = [];            // [{handle, path, mtime, size, title}]
-  let current = null;              // selected session {handle, ...}
-  let currentMod = 0;
+  let rootHandle = null;           // FSA backend (picker / persisted)
+  let rootEntry  = null;           // legacy backend (drag & drop - survives Chrome's AppData blocklist)
+  let storedHandle = null;
+  let sessionList = [];            // [{file(), path, mtime, size, title}]
+  let current = null;
+  let currentMod = 0, currentSize = 0;
   let chatTimer = null, listTimer = null;
 
   // ================= audit.jsonl parsing (port of bridge.py) =================
@@ -162,24 +166,23 @@
     }
     events.sort((a, b) => String(a.timestamp || a._audit_timestamp || '')
       .localeCompare(String(b.timestamp || b._audit_timestamp || '')));
-    const turns = []; let openMsg = {};
+    // coalesce ALL assistant output between two user turns into one Claude turn:
+    // agentic sessions emit dozens of tool-call messages per response.
+    const turns = [];
     for (const ev of events) {
       const ts = ev.timestamp || ev._audit_timestamp || '';
       if (ev.type === 'user') {
         if (!isRealUserTurn(ev)) continue;
         const t = stripNoise(blocksToText((ev.message || {}).content));
-        if (t) { turns.push({ role: 'You', text: t, ts }); openMsg = {}; }
+        if (t) turns.push({ role: 'You', text: t, ts });
       } else if (ev.type === 'assistant') {
-        const msg = ev.message || {};
-        const t = blocksToText(msg.content).trim();
+        const t = blocksToText((ev.message || {}).content).trim();
         if (!t) continue;
-        const mid = msg.id;
-        if (mid && openMsg[mid] !== undefined) {
-          const prev = turns[openMsg[mid]];
-          if (!prev.text.includes(t)) prev.text += '\n' + t;
+        const last = turns[turns.length - 1];
+        if (last && last.role === 'Claude') {
+          if (!last.text.includes(t)) last.text += '\n' + t;
         } else {
           turns.push({ role: 'Claude', text: t, ts });
-          if (mid) openMsg[mid] = turns.length - 1;
         }
       }
     }
@@ -204,42 +207,88 @@
             tldr = m[2].replace(/\**$/, '').trim(); if (m[1]) num = m[1]; tagIdx = i; break;
           }
         }
+        if (!tldr) {
+          // prefer a real text line over tool-call stubs for the collapsed view
+          const textLine = lines.find(l => l.trim() && !/^\[tool: /.test(l.trim()));
+          tldr = (textLine || lines.find(l => l.trim()) || '(empty)').trim().slice(0, 120);
+        }
         const rest = lines.filter((l, i) => i !== tagIdx).join('\n').trim();
-        entries.push({ kind: 'claude', num, tagged: !!tldr,
-                       tldr: tldr || (lines.find(l => l.trim()) || '(empty)').slice(0, 120),
+        entries.push({ kind: 'claude', num, tagged: tagIdx !== -1, tldr,
                        body: rest || t.text });
       }
     }
     return entries;
   }
 
-  // ================= session discovery =================
-  async function scanSessions(dir) {
+  // ================= filesystem backends =================
+  // Both backends produce session objects: {path, mtime, size, title, file: () => Promise<File>}
+  // FSA (picker): persists across reloads, but Chrome refuses AppData/Library folders.
+  // Legacy entries (drag & drop): work on ANY folder, live re-reads, but can't be persisted.
+  const entryFile = fe => new Promise((res, rej) => fe.file(res, rej));
+  const readAllEntries = d => new Promise((res, rej) => {
+    const r = d.createReader(); const all = [];
+    (function next() { r.readEntries(es => { if (!es.length) return res(all); all.push(...es); next(); }, rej); })();
+  });
+
+  async function scanFSA(dir) {
     const found = [];
     async function walk(handle, path, depth) {
       if (depth > 8) return;
-      let it;
-      try { it = handle.entries(); } catch (e) { return; }
-      for await (const [name, h] of it) {
+      let names = [];
+      try {
+        for await (const [name, h] of handle.entries()) names.push([name, h]);
+      } catch (e) { return; }
+      const audit = names.find(([n, h]) => n === 'audit.jsonl' && h.kind === 'file');
+      if (audit) {
         try {
-          if (h.kind === 'file') {
-            if (name === 'audit.jsonl') {
-              const f = await h.getFile();
-              found.push({ handle: h, path: path, mtime: f.lastModified, size: f.size, title: null });
-            }
-          } else if (h.kind === 'directory' && !SKIP_DIRS.has(name) ) {
-            await walk(h, path + '/' + name, depth + 1);
-          }
-        } catch (e) { /* unreadable entry - skip */ }
+          const f = await audit[1].getFile();
+          found.push({ path, mtime: f.lastModified, size: f.size, title: null,
+                       file: () => audit[1].getFile() });
+        } catch (e) { /* skip */ }
+        return;                                    // session dir - don't descend further
+      }
+      for (const [name, h] of names) {
+        if (h.kind === 'directory' && !SKIP_DIRS.has(name)) {
+          try { await walk(h, path + '/' + name, depth + 1); } catch (e) { /* skip */ }
+        }
       }
     }
     await walk(dir, '', 0);
+    return found;
+  }
+  async function scanLegacy(root) {
+    const found = [];
+    async function walk(entry, depth) {
+      if (depth > 8) return;
+      let es;
+      try { es = await readAllEntries(entry); } catch (e) { return; }
+      const audit = es.find(e => e.isFile && e.name === 'audit.jsonl');
+      if (audit) {
+        try {
+          const f = await entryFile(audit);
+          found.push({ path: entry.fullPath, mtime: f.lastModified, size: f.size, title: null,
+                       file: () => entryFile(audit) });
+        } catch (e) { /* skip */ }
+        return;                                    // session dir - don't descend further
+      }
+      for (const e of es) {
+        if (e.isDirectory && !SKIP_DIRS.has(e.name)) {
+          try { await walk(e, depth + 1); } catch (err) { /* skip */ }
+        }
+      }
+    }
+    await walk(root, 0);
+    return found;
+  }
+  async function scanSessions() {
+    const found = rootEntry ? await scanLegacy(rootEntry)
+                : rootHandle ? await scanFSA(rootHandle) : [];
     found.sort((a, b) => b.mtime - a.mtime);
     return found.slice(0, MAX_SESSIONS);
   }
   async function sessionTitle(item) {
     try {
-      const f = await item.handle.getFile();
+      const f = await item.file();
       const text = await f.slice(0, TITLE_SLICE).text();
       const lines = text.split('\n');
       if (f.size > TITLE_SLICE) lines.pop();      // last line may be truncated
@@ -267,7 +316,7 @@
   function renderSessionList() {
     const box = document.getElementById('sessions');
     if (!sessionList.length) {
-      box.innerHTML = '<p class="empty-note">No conversations found in this folder. Pick the Claude session store itself (see paths above).</p>';
+      box.innerHTML = '<p class="empty-note">No conversations found here. Drop the <code>local-agent-mode-sessions</code> folder itself (see paths above).</p>';
       return;
     }
     box.innerHTML = '<p class="list-note">' + sessionList.length + ' conversations, newest first - click one to open</p>'
@@ -283,12 +332,11 @@
       }).join('');
   }
   async function refreshSessions(rescan) {
-    if (!rootHandle) return;
+    if (!rootHandle && !rootEntry) return;
     const st = document.getElementById('status');
     try {
       if (rescan || !sessionList.length) {
-        const fresh = await scanSessions(rootHandle);
-        // keep already-resolved titles for unchanged files
+        const fresh = await scanSessions();
         for (const s of fresh) {
           const old = sessionList.find(o => o.path === s.path);
           if (old && old.mtime === s.mtime) s.title = old.title;
@@ -298,7 +346,6 @@
       renderSessionList();
       st.textContent = sessionList.length + ' conversations - ' + new Date().toLocaleTimeString();
       st.classList.add('live');
-      // resolve missing titles lazily, re-render as they arrive
       for (const s of sessionList) {
         if (s.title === null) {
           s.title = (await sessionTitle(s)) || '';
@@ -306,7 +353,7 @@
         }
       }
     } catch (e) {
-      st.textContent = 'lost access to the sessions folder - reconnect';
+      st.textContent = 'lost access to the sessions folder - reconnect (drop the folder again)';
       st.classList.remove('live');
     }
   }
@@ -328,7 +375,7 @@
     current = sessionList[i];
     if (!current) return;
     view = 'chat';
-    currentMod = 0;
+    currentMod = 0; currentSize = 0;
     document.getElementById('sessions').style.display = 'none';
     document.getElementById('backBtn').style.display = '';
     document.getElementById('hintBar').style.display = '';
@@ -340,21 +387,37 @@
   async function pollChat(force) {
     if (!current) return;
     try {
-      const f = await current.handle.getFile();
-      if (!force && f.lastModified === currentMod) return;
-      currentMod = f.lastModified;
-      const turns = parseAudit(await f.text());
-      entriesState = turnsToEntries(turns);
+      const f = await current.file();
+      if (!force && f.lastModified === currentMod && f.size === currentSize) return;
+      currentMod = f.lastModified; currentSize = f.size;
+      entriesState = turnsToEntries(parseAudit(await f.text()));
       sourceLabel = 'live · ' + (current.title || 'session');
       render();
     } catch (e) {
       const st = document.getElementById('status');
-      st.textContent = 'lost access - reconnect';
+      st.textContent = 'lost access - reconnect (drop the folder again)';
       st.classList.remove('live');
     }
   }
 
-  // ================= folder connection + persistence =================
+  // ================= connection: drag & drop (primary) =================
+  // Chrome's File System Access blocklist refuses AppData/Library for pickers AND for
+  // dropped FSA handles, but the legacy webkitGetAsEntry API reads dropped folders fine.
+  window.addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('dragging'); });
+  window.addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
+  window.addEventListener('drop', e => {
+    e.preventDefault();
+    document.body.classList.remove('dragging');
+    const it = [...(e.dataTransfer.items || [])].find(i => i.kind === 'file');
+    const entry = it && it.webkitGetAsEntry && it.webkitGetAsEntry();
+    if (entry && entry.isDirectory) {
+      rootHandle = null;
+      rootEntry = entry;
+      connected(entry.name);
+    }
+  });
+
+  // ================= connection: picker (folders outside AppData) =================
   function idb() {
     return new Promise((res, rej) => {
       const r = indexedDB.open('tldr-viewer', 1);
@@ -387,43 +450,44 @@
       const p = await storedHandle.queryPermission({ mode: 'read' });
       if (p === 'granted') {
         rootHandle = storedHandle;
-        connected();
+        connected(storedHandle.name);
       } else {
         document.getElementById('connectBtn').textContent = 'reconnect: ' + storedHandle.name;
       }
     } catch (e) { /* stale handle */ }
   })();
-  function connected() {
-    document.getElementById('connectBtn').textContent = 'connected (' + rootHandle.name + ')';
+  function connected(name) {
+    document.getElementById('connectBtn').textContent = 'connected (' + name + ')';
     document.getElementById('dropzone').classList.add('compact');
     showSessionList();
   }
   async function connectSessions() {
     const st = document.getElementById('status');
     if (location.protocol === 'file:') {
-      st.textContent = 'folder access is blocked on file:// - open the hosted viewer or run a local server (or just paste a chat)';
+      st.textContent = 'folder access is blocked on file:// - open the hosted viewer (or just paste a chat)';
       return;
     }
-    if (storedHandle && !rootHandle) {
+    if (storedHandle && !rootHandle && !rootEntry) {
       try {
         const p = await storedHandle.requestPermission({ mode: 'read' });
-        if (p === 'granted') { rootHandle = storedHandle; connected(); return; }
+        if (p === 'granted') { rootHandle = storedHandle; connected(storedHandle.name); return; }
       } catch (e) { /* fall through */ }
       storedHandle = null;
     }
     if (!window.showDirectoryPicker) {
-      st.textContent = 'this browser has no folder picker (Chrome/Edge needed) - paste a chat instead (Ctrl+V)';
+      st.textContent = 'this browser has no folder picker - drag the folder onto the page instead, or paste a chat (Ctrl+V)';
       return;
     }
     try {
       rootHandle = await window.showDirectoryPicker();
+      rootEntry = null;
       saveHandle(rootHandle);
       storedHandle = rootHandle;
-      connected();
+      connected(rootHandle.name);
     } catch (e) {
       st.textContent = (e && e.name === 'AbortError')
-        ? 'folder pick cancelled'
-        : 'folder picker failed (' + (e && e.name || e) + ') - paste a chat instead (Ctrl+V)';
+        ? 'folder pick cancelled - note: Chrome refuses AppData/Library here; DRAG the folder onto the page instead'
+        : 'folder picker failed (' + (e && e.name || e) + ') - drag the folder onto the page instead';
     }
   }
 
@@ -535,7 +599,7 @@
     view = 'chat';
     clearInterval(chatTimer); clearInterval(listTimer);
     document.getElementById('sessions').style.display = 'none';
-    document.getElementById('backBtn').style.display = rootHandle ? '' : 'none';
+    document.getElementById('backBtn').style.display = (rootHandle || rootEntry) ? '' : 'none';
     document.getElementById('hintBar').style.display = '';
     entriesState = SPEAK_RE.test(text) ? parseMirror(text) : parseFlat(text);
     sourceLabel = label || 'pasted chat';
@@ -598,9 +662,9 @@
     caps.push('protocol=' + location.protocol);
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
-    const msg = 'v9 ready · ' + caps.join(' · ');
+    const msg = 'v9.1 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
-    if (st && !rootHandle) st.textContent = msg;
+    if (st && !rootHandle && !rootEntry) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);
     document.getElementById('hintBar').style.display = 'none';
   })();
@@ -610,18 +674,18 @@
 
 The chat stream is append-only prose with no outline, collapse or search. Any derived mirror creates a sync problem - someone must keep it current. Embedding the summary in each message removes that dependency: every copy of the conversation already carries its compact layer.
 
-> **TL;DR #2:** v9 removes the CLI entirely: the viewer reads audit.jsonl straight from the Claude session store via the File System Access API.
+> **TL;DR #2:** v9 removes the CLI entirely: the viewer reads audit.jsonl straight from the Claude session store.
 
 bridge.py's parser was ported to JavaScript. The viewer scans the sessions folder, titles each conversation by its first user message, and re-parses the selected session file whenever it changes - the same live behavior, zero setup.
 
 \`\`\`
-v8: audit.jsonl -> bridge.py -> chat-mirror.md -> viewer
-v9: audit.jsonl -> viewer
+v8:   audit.jsonl -> bridge.py -> chat-mirror.md -> viewer
+v9.1: audit.jsonl -> viewer (drag the folder onto the page)
 \`\`\`
 
-> **TL;DR #3:** Everything stays local: folder permission is read-only, per-origin, revocable, and no byte ever leaves the browser.
+> **TL;DR #3:** Chrome's picker refuses AppData, so v9.1 connects via drag & drop: the legacy entries API reads dropped folders that the File System Access API blocks.
 
-The File System Access API only works on Chrome/Edge over https or localhost, which is why pasting remains as the universal fallback.`;
+Everything stays local: the dropped folder is readable only by this page while it is open, and no byte ever leaves the browser. Pasting remains as the universal fallback for other browsers.`;
   function loadDemo() { ingest(DEMO, 'demo'); }
 </script>
 </body>
