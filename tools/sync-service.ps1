@@ -2,11 +2,11 @@
 #
 # Mirrors every audit.jsonl from the Claude desktop app's session store
 # (blocked for browsers by Chrome's AppData blocklist) into
-# Documents\claude-sessions, which the viewer CAN pick and remember.
+# Downloads\claude-sessions, which the viewer CAN pick and remember.
 # Copies only files that changed; timestamps are preserved, so the
 # viewer's sorting and ACTIVE badge keep working.
 #
-# Installed by setup.bat as a hidden logon task. ~0 CPU while idle.
+# Installed by setup.bat as a hidden autostart entry. ~0 CPU while idle.
 
 $src = Join-Path $env:APPDATA 'Claude\local-agent-mode-sessions'
 # Downloads, not Documents: Chrome's picker refuses Documents children on
