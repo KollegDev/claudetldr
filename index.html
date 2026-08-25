@@ -57,7 +57,9 @@
                         max-width:78%; font-size:.92rem;
                         white-space:pre-wrap; overflow-wrap:break-word; }
   .entry.user.expandable .bubble { cursor:pointer; }
-  .entry.user .entry-full { max-width:78%; }
+  .entry.user .entry-full { margin-top:.4rem; }
+  .entry.user.open .bubble { border-left:3px solid var(--live); }
+  .entry.user.open .entry-tldr { display:none; }
   .entry.claude { padding:0 .1rem; }
   .claude .entry-head { display:flex; align-items:baseline; gap:.55rem; cursor:pointer; }
   .claude .entry-head::before { content:"\2731"; color:var(--accent); font-size:.72rem; }
@@ -71,6 +73,9 @@
   .entry.expandable:not(.open) .entry-state::after { content:"original"; }
   .entry-full { display:none; margin-top:.5rem; }
   .claude .entry-full { margin-left:1.35rem; }
+  /* expanded = original replaces the TL;DR, marked by a thin green line */
+  .entry.claude.open { border-left:3px solid var(--live); padding-left:.7rem; }
+  .entry.claude.open .entry-head .entry-tldr { display:none; }
   .entry.open .entry-full { display:block; }
   .entry.hit-hidden { display:none; }
   .original { white-space:pre-wrap; overflow-wrap:break-word; font-size:.88rem;
@@ -86,7 +91,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v13</span></h1>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v14</span></h1>
     <span class="status" id="status">not connected</span>
   </header>
 
@@ -705,8 +710,8 @@
         <div class="bubble" ${expandable ? 'onclick="toggleEntry(this.parentElement)"' : ''}>
           <span class="entry-tldr">${esc(e.tldr || '')}</span>
           ${expandable ? ' <span class="entry-state"></span>' : ''}
+          ${full}
         </div>
-        ${full}
       </article>`;
       }
       claudeCount++;
@@ -860,7 +865,7 @@
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
     caps.push('builtinAI=' + ('Summarizer' in self));
-    const msg = 'v13 ready · ' + caps.join(' · ');
+    const msg = 'v14 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
     if (st && !rootHandle && !rootEntry) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);
