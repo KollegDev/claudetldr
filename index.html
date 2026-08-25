@@ -53,12 +53,6 @@
   #obHint { color:var(--warn); font-size:.85rem; margin-top:.6rem; }
   #obLive { margin-bottom:.9rem; padding-bottom:.8rem; border-bottom:1px solid var(--line); }
   .ob-alt p { margin:.5rem 0; }
-  .cmd-row { display:flex; gap:.4rem; align-items:stretch; margin:.45rem 0 .3rem; }
-  .cmd-row code { flex:1; background:var(--bg); border:1px solid var(--line); border-radius:8px;
-                  padding:.45rem .6rem; font-size:.76rem; overflow-x:auto; white-space:nowrap;
-                  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--ink); }
-  .cmd-copy { flex:none; font:inherit; font-size:.76rem; cursor:pointer; border-radius:8px;
-              border:1px solid var(--accent); color:var(--accent); background:var(--card); padding:0 .7rem; }
   #srcBox { white-space:pre-wrap; overflow-x:auto; max-height:22rem; overflow-y:auto;
             background:var(--bg); border:1px solid var(--line); border-radius:8px;
             padding:.7rem; font-size:.72rem; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
@@ -116,7 +110,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v19</span></h1>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v20</span></h1>
     <span class="status" id="status">not connected</span>
   </header>
 
@@ -139,18 +133,15 @@
     </div>
     <div class="ob current" id="ob1">
       <span class="ob-n">A</span>
-      <div><strong>Set it up in one line</strong> &mdash; press <kbd>Win</kbd>+<kbd>X</kbd>, click
-        <em>Terminal</em> (or <em>Windows PowerShell</em>), paste this and hit Enter:
-        <div class="cmd-row">
-          <code id="cmdInstall">iwr -useb https://kollegdev.github.io/claudetldr/install.ps1 | iex</code>
-          <button class="cmd-copy" onclick="copyCmd('cmdInstall', this)">copy</button>
-        </div>
-        <span class="ob-small">Your conversations open by themselves and come back after every logon.
-        Because you run this yourself, Windows shows <strong>no download warning and no
-        "unknown publisher" dialog</strong> - nothing is downloaded through the browser.<br>
-        Just trying it out? <a href="#" onclick="swapCmd();return false">use the portable command
-        instead</a> (installs nothing, stops when you close the window).
-        &middot; macOS: <a href="#" onclick="showSource('mac');return false">see the macOS command</a>.
+      <div><strong>Download <a href="#" onclick="downloadSetup('win');return false">setup.bat</a>
+        and double-click it.</strong>
+        <span class="ob-small">Your conversations open by themselves and come back after every logon -
+        nothing to pick, nothing to allow. It's a short, plain-text script you can read first
+        (<a href="#" onclick="showSource('win');return false">show it here</a>); Windows will show its
+        usual warning for downloaded scripts.<br>
+        Just trying it out? <a href="#" onclick="downloadSetup('run');return false">run-once.bat</a>
+        installs nothing and stops when you close its window.
+        &middot; macOS: <a href="#" onclick="showSource('mac');return false">install.sh</a>.
         &middot; Already installed? <a href="http://127.0.0.1:7817/">open the viewer</a>.</span></div>
     </div>
     <div class="ob" id="ob2">
@@ -164,12 +155,12 @@
     </div>
     <div id="obHint"></div>
     <details class="ob-alt"><summary>Is that safe? What does the command do?</summary>
-      <p>Never run a command you can't read - so read it first. It fetches one short script from
-      this site and runs it; both it and everything it installs are public:
+      <p>Never run a script you can't read - so read it first. It's a few dozen lines of plain text,
+      and everything it installs is public:
       <a href="https://github.com/KollegDev/claudetldr" target="_blank" rel="noopener">github.com/KollegDev/claudetldr</a>.
-      Open the script in your browser before running it:
-      <a href="install.ps1" target="_blank">install.ps1</a> &middot;
-      <a href="run.ps1" target="_blank">run.ps1</a> &middot;
+      Read them right here: <a href="#" onclick="showSource('win');return false">setup.bat</a> &middot;
+      <a href="#" onclick="showSource('run');return false">run-once.bat</a> &middot;
+      <a href="#" onclick="showSource('uninstall');return false">uninstall.bat</a> &middot;
       <a href="https://github.com/KollegDev/claudetldr/blob/main/tools/serve-service.ps1"
          target="_blank" rel="noopener">serve-service.ps1</a> (the server itself).</p>
       <p><strong>What it does:</strong> downloads the viewer and a ~140-line PowerShell server into
@@ -178,15 +169,14 @@
       outbound connection afterwards, no telemetry, no account - and the socket is bound to
       <code>127.0.0.1</code>, unreachable from the network. The install command adds exactly one
       autostart entry; the portable one adds nothing.
-      Remove everything: <code>iwr -useb https://kollegdev.github.io/claudetldr/uninstall.ps1 | iex</code></p>
-      <p><strong>Why a pasted command and not a download?</strong> Files downloaded through a browser
-      get flagged by Windows ("unknown publisher", SmartScreen) no matter how harmless they are -
-      removing that flag needs a paid code-signing certificate. A command you paste yourself isn't
-      a download, so none of those dialogs appear. Prefer files anyway?
-      <a href="#" onclick="downloadSetup('run');return false">run-once.bat</a> &middot;
-      <a href="#" onclick="downloadSetup('win');return false">setup.bat</a> (expect the generic
-      Windows warning) &middot;
-      <a href="#" onclick="showSource('win');return false">show their source</a>.</p>
+      Remove everything with
+      <a href="#" onclick="downloadSetup('uninstall');return false">uninstall.bat</a>.</p>
+      <p><strong>About the Windows warning:</strong> it appears for every script downloaded from the
+      internet, regardless of content - Windows tags browser downloads, and only a paid code-signing
+      certificate silences it. That's why the file is kept short and readable: open it in Notepad,
+      see the few lines it runs, then decide. Rather avoid the download entirely? Option B needs no
+      script at all, or run this in Terminal instead:
+      <code>iwr -useb https://kollegdev.github.io/claudetldr/install.ps1 | iex</code></p>
       <pre id="srcBox" style="display:none"></pre>
     </details>
   </div>
@@ -240,24 +230,6 @@
   function obHint(t) {
     const h = document.getElementById('obHint');
     if (h) h.textContent = t || '';
-  }
-  const CMDS = {
-    install: { text: 'iwr -useb https://kollegdev.github.io/claudetldr/install.ps1 | iex', label: 'use the portable command instead' },
-    run:     { text: 'iwr -useb https://kollegdev.github.io/claudetldr/run.ps1 | iex',     label: 'use the permanent command instead' },
-    mac:     { text: 'curl -fsSL https://kollegdev.github.io/claudetldr/install.sh | bash', label: '' }
-  };
-  let cmdMode = 'install';
-  function copyCmd(id, btn) {
-    const t = document.getElementById(id).textContent;
-    navigator.clipboard.writeText(t).then(
-      () => { btn.textContent = 'copied'; setTimeout(() => btn.textContent = 'copy', 1500); },
-      () => { btn.textContent = 'select it'; });
-  }
-  function swapCmd() {
-    cmdMode = cmdMode === 'install' ? 'run' : 'install';
-    document.getElementById('cmdInstall').textContent = CMDS[cmdMode].text;
-    const link = document.querySelector('[onclick*="swapCmd"]');
-    if (link) link.textContent = CMDS[cmdMode].label;
   }
   function showSource(which) {
     const f = SETUP_FILES[which];
@@ -1029,7 +1001,7 @@
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
     caps.push('builtinAI=' + ('Summarizer' in self));
-    const msg = 'v19 ready · ' + caps.join(' · ');
+    const msg = 'v20 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
     if (st && !rootHandle && !rootEntry) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);
