@@ -86,7 +86,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v12</span></h1>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v13</span></h1>
     <span class="status" id="status">not connected</span>
   </header>
 
@@ -263,25 +263,37 @@
     (function next() { r.readEntries(es => { if (!es.length) return res(all); all.push(...es); next(); }, rej); })();
   });
 
+  // A session dir contains audit.jsonl; Cowork keeps its metadata (real title,
+  // archive flag, ...) in a SIBLING file named <sessionDirName>.json.
   async function scanFSA(dir) {
     const found = [];
+    try {   // picked dir IS a session dir
+      const a = await dir.getFileHandle('audit.jsonl');
+      const f = await a.getFile();
+      found.push({ path: '/', mtime: f.lastModified, size: f.size, title: null,
+                   file: () => a.getFile(), meta: null });
+      return found;
+    } catch (e) { /* normal store root */ }
     async function walk(handle, path, depth) {
       if (depth > 8) return;
       let names = [];
       try {
         for await (const [name, h] of handle.entries()) names.push([name, h]);
       } catch (e) { return; }
-      const audit = names.find(([n, h]) => n === 'audit.jsonl' && h.kind === 'file');
-      if (audit) {
-        try {
-          const f = await audit[1].getFile();
-          found.push({ path, mtime: f.lastModified, size: f.size, title: null,
-                       file: () => audit[1].getFile() });
-        } catch (e) { /* skip */ }
-        return;                                    // session dir - don't descend further
-      }
+      const files = new Map(names.filter(([n, h]) => h.kind === 'file').map(([n, h]) => [n, h]));
       for (const [name, h] of names) {
-        if (h.kind === 'directory' && !SKIP_DIRS.has(name)) {
+        if (h.kind !== 'directory' || SKIP_DIRS.has(name)) continue;
+        let audit = null;
+        try { audit = await h.getFileHandle('audit.jsonl'); } catch (e) { audit = null; }
+        if (audit) {
+          try {
+            const f = await audit.getFile();
+            const metaH = files.get(name + '.json') || null;
+            found.push({ path: path + '/' + name, mtime: f.lastModified, size: f.size, title: null,
+                         file: () => audit.getFile(),
+                         meta: metaH ? () => metaH.getFile() : null });
+          } catch (e) { /* skip */ }
+        } else {
           try { await walk(h, path + '/' + name, depth + 1); } catch (e) { /* skip */ }
         }
       }
@@ -295,18 +307,31 @@
       if (depth > 8) return;
       let es;
       try { es = await readAllEntries(entry); } catch (e) { return; }
-      const audit = es.find(e => e.isFile && e.name === 'audit.jsonl');
-      if (audit) {
+      const files = new Map(es.filter(e => e.isFile).map(e => [e.name, e]));
+      if (depth === 0 && files.has('audit.jsonl')) {   // dropped a session dir directly
         try {
+          const audit = files.get('audit.jsonl');
           const f = await entryFile(audit);
           found.push({ path: entry.fullPath, mtime: f.lastModified, size: f.size, title: null,
-                       file: () => entryFile(audit) });
+                       file: () => entryFile(audit), meta: null });
         } catch (e) { /* skip */ }
-        return;                                    // session dir - don't descend further
+        return;
       }
-      for (const e of es) {
-        if (e.isDirectory && !SKIP_DIRS.has(e.name)) {
-          try { await walk(e, depth + 1); } catch (err) { /* skip */ }
+      for (const d of es) {
+        if (!d.isDirectory || SKIP_DIRS.has(d.name)) continue;
+        let sub;
+        try { sub = await readAllEntries(d); } catch (e) { continue; }
+        const audit = sub.find(x => x.isFile && x.name === 'audit.jsonl');
+        if (audit) {
+          try {
+            const f = await entryFile(audit);
+            const metaE = files.get(d.name + '.json') || null;
+            found.push({ path: d.fullPath, mtime: f.lastModified, size: f.size, title: null,
+                         file: () => entryFile(audit),
+                         meta: metaE ? () => entryFile(metaE) : null });
+          } catch (e) { /* skip */ }
+        } else {
+          try { await walk(d, depth + 1); } catch (err) { /* skip */ }
         }
       }
     }
@@ -320,6 +345,14 @@
     return found.slice(0, MAX_SESSIONS);
   }
   async function sessionTitle(item) {
+    // 1st choice: Cowork's own title from the sibling metadata json
+    if (item.meta) {
+      try {
+        const m = JSON.parse(await (await item.meta()).text());
+        if (m && typeof m.title === 'string' && m.title.trim())
+          return m.title.trim().slice(0, 100);
+      } catch (e) { /* fall through to first-message fallback */ }
+    }
     try {
       const f = await item.file();
       const text = await f.slice(0, TITLE_SLICE).text();
@@ -827,7 +860,7 @@
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
     caps.push('builtinAI=' + ('Summarizer' in self));
-    const msg = 'v12 ready · ' + caps.join(' · ');
+    const msg = 'v13 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
     if (st && !rootHandle && !rootEntry) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);
