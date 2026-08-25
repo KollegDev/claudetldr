@@ -8,10 +8,12 @@
   :root {
     --bg:#faf9f5; --card:#fff; --ink:#1a1915; --muted:#6b6a63;
     --accent:#c96442; --user:#3d6ea5; --line:#e8e6df; --mark:#ffe9a8; --warn:#a3660a; --live:#2e7d4f;
+    --bubble:#eee9df;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg:#1a1915; --card:#24231e; --ink:#f0efe9; --muted:#a3a199;
-            --line:#3a3830; --mark:#5c4a12; --warn:#e0a43c; --user:#7ea8d8; --live:#5cb884; }
+            --line:#3a3830; --mark:#5c4a12; --warn:#e0a43c; --user:#7ea8d8; --live:#5cb884;
+            --bubble:#30302a; }
   }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
@@ -46,23 +48,29 @@
   .session .s-meta { font-size:.75rem; color:var(--muted); white-space:nowrap; }
   .session .s-active { font-size:.7rem; color:var(--live); font-weight:700; white-space:nowrap; }
   .list-note { color:var(--muted); font-size:.85rem; margin:.4rem 0 1rem; }
-  /* entries */
-  article.entry { background:var(--card); border:1px solid var(--line); border-radius:12px;
-                  padding:.9rem 1.2rem; margin-bottom:.7rem; scroll-margin-top:1rem; }
-  article.entry.untagged { border-left:3px solid var(--warn); }
-  article.entry.user { background:transparent; border:none; border-left:3px solid var(--user);
-                       border-radius:0; padding:.3rem 1.2rem; margin:1.1rem 0 .7rem; }
-  article.entry.focused { outline:2px solid var(--accent); outline-offset:2px; }
-  .entry-head { display:flex; align-items:baseline; gap:.6rem; cursor:pointer; }
-  .entry-num { color:var(--accent); font-weight:700; font-size:.8rem; white-space:nowrap; }
-  .entry.user .entry-num { color:var(--user); }
-  .entry.untagged .entry-num { color:var(--warn); }
+  /* entries - styled like the Cowork chat: user bubbles right, Claude text left */
+  article.entry { background:transparent; border:none; padding:0; margin:.45rem 0; scroll-margin-top:1rem; }
+  article.entry.focused { outline:2px solid var(--accent); outline-offset:3px; border-radius:8px; }
+  .entry.user { display:flex; flex-direction:column; align-items:flex-end; margin:1.1rem 0; }
+  .entry.user .bubble { background:var(--bubble); color:var(--ink); text-align:left;
+                        border-radius:16px 16px 4px 16px; padding:.55rem .95rem;
+                        max-width:78%; font-size:.92rem;
+                        white-space:pre-wrap; overflow-wrap:break-word; }
+  .entry.user.expandable .bubble { cursor:pointer; }
+  .entry.user .entry-full { max-width:78%; }
+  .entry.claude { padding:0 .1rem; }
+  .claude .entry-head { display:flex; align-items:baseline; gap:.55rem; cursor:pointer; }
+  .claude .entry-head::before { content:"\2731"; color:var(--accent); font-size:.72rem; }
+  .entry-num { color:var(--muted); font-weight:600; font-size:.68rem;
+               border:1px solid var(--line); border-radius:999px; padding:0 .45rem;
+               white-space:nowrap; align-self:center; }
+  .entry.untagged .entry-num { color:var(--warn); border-color:var(--warn); }
   .entry-tldr { flex:1; }
-  .entry.user .entry-tldr { color:var(--user); font-weight:500; font-size:.92rem; }
   .entry-state { font-size:.7rem; color:var(--muted); white-space:nowrap; }
   .entry.expandable.open .entry-state::after { content:"collapse"; }
   .entry.expandable:not(.open) .entry-state::after { content:"original"; }
-  .entry-full { display:none; margin-top:.8rem; padding-top:.8rem; border-top:1px dashed var(--line); }
+  .entry-full { display:none; margin-top:.5rem; }
+  .claude .entry-full { margin-left:1.35rem; }
   .entry.open .entry-full { display:block; }
   .entry.hit-hidden { display:none; }
   .original { white-space:pre-wrap; overflow-wrap:break-word; font-size:.88rem;
@@ -108,7 +116,7 @@
 
   <div id="sessions" style="display:none"></div>
   <div id="entries"></div>
-  <p class="hint" id="hintBar">Click / <strong>t</strong> toggle &middot; <strong>j</strong>/<strong>k</strong> jump &middot; blue waypoints are your messages</p>
+  <p class="hint" id="hintBar">Click / <strong>t</strong> toggle &middot; <strong>j</strong>/<strong>k</strong> jump &middot; your messages are the bubbles on the right</p>
 </div>
 
 <script>
@@ -535,18 +543,28 @@
     }
     let claudeCount = 0;
     box.innerHTML = entriesState.map((e, i) => {
-      if (e.kind === 'claude') claudeCount++;
       const expandable = !!e.body;
-      const num = e.kind === 'user' ? 'you · ' + (e.num || '?')
-                : e.tagged === false ? 'untagged' : '#' + (e.num || '?');
-      return `
-      <article class="entry ${e.kind} ${e.tagged === false ? 'untagged' : ''} ${expandable ? 'expandable' : ''}" id="e${i}">
-        <div class="entry-head" ${expandable ? 'onclick="toggleEntry(this.parentElement)"' : ''}>
-          <span class="entry-num">${num}</span>
+      const full = expandable ? `<div class="entry-full"><div class="original">${renderBody(e.body)}</div></div>` : '';
+      if (e.kind === 'user') {
+        return `
+      <article class="entry user ${expandable ? 'expandable' : ''}" id="e${i}" title="turn ${e.num || ''}">
+        <div class="bubble" ${expandable ? 'onclick="toggleEntry(this.parentElement)"' : ''}>
           <span class="entry-tldr">${esc(e.tldr || '')}</span>
+          ${expandable ? ' <span class="entry-state"></span>' : ''}
+        </div>
+        ${full}
+      </article>`;
+      }
+      claudeCount++;
+      const num = e.tagged === false ? 'untagged' : '#' + (e.num || '?');
+      return `
+      <article class="entry claude ${e.tagged === false ? 'untagged' : ''} ${expandable ? 'expandable' : ''}" id="e${i}">
+        <div class="entry-head" ${expandable ? 'onclick="toggleEntry(this.parentElement)"' : ''}>
+          <span class="entry-tldr">${esc(e.tldr || '')}</span>
+          <span class="entry-num">${num}</span>
           ${expandable ? '<span class="entry-state"></span>' : ''}
         </div>
-        ${expandable ? `<div class="entry-full"><div class="original">${renderBody(e.body)}</div></div>` : ''}
+        ${full}
       </article>`;
     }).join("");
     const u = entriesState.filter(e => e.kind === 'user').length;
