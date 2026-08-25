@@ -538,7 +538,13 @@
     if (!('Summarizer' in self)) return;
     try {
       const a = await Summarizer.availability();
-      if (a === 'available') sumEnabled = true;
+      if (a === 'available') {
+        sumEnabled = true;
+        // warm up in the background: the first create/summarize pair can take
+        // ~30s while the model loads; overlapping that with browsing hides it
+        Summarizer.create({ type: 'tldr', length: 'short', format: 'plain-text' })
+          .then(s => { summarizer = s; }).catch(() => {});
+      }
       else if (a === 'downloadable' || a === 'downloading')
         document.getElementById('aiBtn').style.display = '';
     } catch (e) { /* API present but unusable - stay silent */ }
@@ -585,7 +591,10 @@
   async function processSumQueue() {
     if (sumBusy) return;
     sumBusy = true;
+    const btn = document.getElementById('aiBtn');
     while (sumQueue.length) {
+      if (btn) { btn.style.display = ''; btn.disabled = true;
+                 btn.textContent = 'AI summarizing · ' + sumQueue.length + ' left'; }
       const { e, i } = sumQueue.shift();
       try {
         const key = await contentHash(e.body);
@@ -608,6 +617,7 @@
         }
       } catch (err) { break; }  // model gone mid-run etc. - retry on next render
     }
+    if (btn) { btn.style.display = 'none'; btn.disabled = false; btn.textContent = 'enable AI summaries'; }
     sumBusy = false;
   }
   initSummaries();
@@ -645,9 +655,9 @@
       </article>`;
       }
       claudeCount++;
-      const num = e.tagged === false ? 'untagged' : '#' + (e.num || '?');
+      const num = e.tagged === false ? (e.ai ? 'ai' : 'untagged') : '#' + (e.num || '?');
       return `
-      <article class="entry claude ${e.tagged === false ? 'untagged' : ''} ${expandable ? 'expandable' : ''}" id="e${i}">
+      <article class="entry claude ${e.tagged === false && !e.ai ? 'untagged' : ''} ${expandable ? 'expandable' : ''}" id="e${i}">
         <div class="entry-head" ${expandable ? 'onclick="toggleEntry(this.parentElement)"' : ''}>
           <span class="entry-tldr">${esc(e.tldr || '')}</span>
           <span class="entry-num">${num}</span>
