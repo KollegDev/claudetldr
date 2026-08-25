@@ -53,6 +53,12 @@
   #obHint { color:var(--warn); font-size:.85rem; margin-top:.6rem; }
   #obLive { margin-bottom:.9rem; padding-bottom:.8rem; border-bottom:1px solid var(--line); }
   .ob-alt p { margin:.5rem 0; }
+  .cmd-row { display:flex; gap:.4rem; align-items:stretch; margin:.45rem 0 .3rem; }
+  .cmd-row code { flex:1; background:var(--bg); border:1px solid var(--line); border-radius:8px;
+                  padding:.45rem .6rem; font-size:.76rem; overflow-x:auto; white-space:nowrap;
+                  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--ink); }
+  .cmd-copy { flex:none; font:inherit; font-size:.76rem; cursor:pointer; border-radius:8px;
+              border:1px solid var(--accent); color:var(--accent); background:var(--card); padding:0 .7rem; }
   #srcBox { white-space:pre-wrap; overflow-x:auto; max-height:22rem; overflow-y:auto;
             background:var(--bg); border:1px solid var(--line); border-radius:8px;
             padding:.7rem; font-size:.72rem; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
@@ -110,7 +116,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v18</span></h1>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v19</span></h1>
     <span class="status" id="status">not connected</span>
   </header>
 
@@ -133,45 +139,54 @@
     </div>
     <div class="ob current" id="ob1">
       <span class="ob-n">A</span>
-      <div><strong>Try it with nothing installed</strong>
-        <span class="ob-small">Drag the folder <code>local-agent-mode-sessions</code> onto this page
-        (<kbd>Win</kbd>+<kbd>R</kbd> &rarr; paste <code>%APPDATA%\Claude</code> &rarr; Enter; macOS:
-        Finder &rarr; <code>~/Library/Application Support/Claude</code>). Your conversations stay in
-        this tab and nothing is written anywhere - you just re-drop the folder after a reload.
-        Or paste any copied chat with <kbd>Ctrl</kbd>+<kbd>V</kbd>.</span></div>
+      <div><strong>Set it up in one line</strong> &mdash; press <kbd>Win</kbd>+<kbd>X</kbd>, click
+        <em>Terminal</em> (or <em>Windows PowerShell</em>), paste this and hit Enter:
+        <div class="cmd-row">
+          <code id="cmdInstall">iwr -useb https://kollegdev.github.io/claudetldr/install.ps1 | iex</code>
+          <button class="cmd-copy" onclick="copyCmd('cmdInstall', this)">copy</button>
+        </div>
+        <span class="ob-small">Your conversations open by themselves and come back after every logon.
+        Because you run this yourself, Windows shows <strong>no download warning and no
+        "unknown publisher" dialog</strong> - nothing is downloaded through the browser.<br>
+        Just trying it out? <a href="#" onclick="swapCmd();return false">use the portable command
+        instead</a> (installs nothing, stops when you close the window).
+        &middot; macOS: <a href="#" onclick="showSource('mac');return false">see the macOS command</a>.
+        &middot; Already installed? <a href="http://127.0.0.1:7817/">open the viewer</a>.</span></div>
     </div>
     <div class="ob" id="ob2">
       <span class="ob-n">B</span>
-      <div><strong>Or make it permanent</strong> &mdash; then it just runs, with nothing to pick or allow:
-        <span class="ob-small">
-        <a href="#" onclick="downloadSetup('run');return false">run-once.bat</a> &mdash; portable, installs
-        nothing, runs while its window is open. &nbsp;&middot;&nbsp;
-        <a href="#" onclick="downloadSetup('win');return false">setup.bat</a> &mdash; same thing, but it
-        starts by itself after every logon (<a href="#" onclick="downloadSetup('uninstall');return false">uninstall.bat</a>
-        reverses it). &nbsp;&middot;&nbsp; macOS beta:
-        <a href="#" onclick="downloadSetup('mac');return false">setup&#8209;mac.command</a>.<br>
-        Already ran one? <a href="http://127.0.0.1:7817/">Open the viewer</a>.</span></div>
+      <div><strong>Or install nothing at all</strong>
+        <span class="ob-small">Drag the folder <code>local-agent-mode-sessions</code> onto this page
+        (<kbd>Win</kbd>+<kbd>R</kbd> &rarr; paste <code>%APPDATA%\Claude</code> &rarr; Enter; macOS:
+        Finder &rarr; <code>~/Library/Application Support/Claude</code>). Everything stays in this tab;
+        you re-drop the folder after a reload. Or paste any copied chat with
+        <kbd>Ctrl</kbd>+<kbd>V</kbd>.</span></div>
     </div>
     <div id="obHint"></div>
-    <details class="ob-alt"><summary>Is that safe? What do these scripts do?</summary>
-      <p>Fair question - never run a script you can't read. These are deliberately short and
-      readable, and every line they run is public:
-      <a href="https://github.com/KollegDev/claudetldr" target="_blank" rel="noopener">github.com/KollegDev/claudetldr</a>.</p>
-      <p><strong>What it does:</strong> downloads two files (the viewer and a ~140-line PowerShell
-      server) into a folder of its own, then serves your conversations at
-      <code>127.0.0.1:7817</code> so the browser can show them.
+    <details class="ob-alt"><summary>Is that safe? What does the command do?</summary>
+      <p>Never run a command you can't read - so read it first. It fetches one short script from
+      this site and runs it; both it and everything it installs are public:
+      <a href="https://github.com/KollegDev/claudetldr" target="_blank" rel="noopener">github.com/KollegDev/claudetldr</a>.
+      Open the script in your browser before running it:
+      <a href="install.ps1" target="_blank">install.ps1</a> &middot;
+      <a href="run.ps1" target="_blank">run.ps1</a> &middot;
+      <a href="https://github.com/KollegDev/claudetldr/blob/main/tools/serve-service.ps1"
+         target="_blank" rel="noopener">serve-service.ps1</a> (the server itself).</p>
+      <p><strong>What it does:</strong> downloads the viewer and a ~140-line PowerShell server into
+      its own folder, then serves your conversations at <code>127.0.0.1:7817</code>.
       <strong>What it does not do:</strong> no admin rights, no copies of your conversations, no
-      outbound connection after those two downloads, no telemetry, no account - and the socket is
-      bound to <code>127.0.0.1</code>, so nothing outside your computer can reach it.
-      <code>setup.bat</code> adds exactly one autostart entry; <code>run-once.bat</code> adds
-      nothing at all.</p>
-      <p><strong>Windows will warn you</strong> when you download a <code>.bat</code> - that warning
-      is generic, it appears for every batch file on the internet. Read the file first (it's plain
-      text, open it in Notepad), then decide. Prefer not to? Option A above needs no script at all.</p>
-      <p>Read before running: <a id="srcRun" href="#" onclick="showSource('run');return false">run-once.bat</a>
-      &middot; <a id="srcWin" href="#" onclick="showSource('win');return false">setup.bat</a>
-      &middot; <a href="https://github.com/KollegDev/claudetldr/blob/main/tools/serve-service.ps1"
-      target="_blank" rel="noopener">serve-service.ps1</a></p>
+      outbound connection afterwards, no telemetry, no account - and the socket is bound to
+      <code>127.0.0.1</code>, unreachable from the network. The install command adds exactly one
+      autostart entry; the portable one adds nothing.
+      Remove everything: <code>iwr -useb https://kollegdev.github.io/claudetldr/uninstall.ps1 | iex</code></p>
+      <p><strong>Why a pasted command and not a download?</strong> Files downloaded through a browser
+      get flagged by Windows ("unknown publisher", SmartScreen) no matter how harmless they are -
+      removing that flag needs a paid code-signing certificate. A command you paste yourself isn't
+      a download, so none of those dialogs appear. Prefer files anyway?
+      <a href="#" onclick="downloadSetup('run');return false">run-once.bat</a> &middot;
+      <a href="#" onclick="downloadSetup('win');return false">setup.bat</a> (expect the generic
+      Windows warning) &middot;
+      <a href="#" onclick="showSource('win');return false">show their source</a>.</p>
       <pre id="srcBox" style="display:none"></pre>
     </details>
   </div>
@@ -184,7 +199,7 @@
 <script>
   // ================= setup installers (downloadable from the page) =================
   // __SETUP_FILES_START__ (generated by tools/make-setup.py - do not edit)
-  const SETUP_FILES = {"run": {"name": "run-once.bat", "content": "@echo off\r\nREM ===========================================================================\r\nREM  claudetldr - PORTABLE start. Nothing is installed, nothing is remembered.\r\nREM\r\nREM  What this does, in full:\r\nREM    1. downloads two files from the public repo into a temp folder:\r\nREM         tools/serve-service.ps1   (the local server, ~140 readable lines)\r\nREM         index.html                (the viewer)\r\nREM    2. opens http://127.0.0.1:7817/ in your browser\r\nREM    3. runs the server in THIS window until you close it\r\nREM\r\nREM  It does not write to the registry, does not start with Windows, needs no\r\nREM  admin rights, and makes no outbound connection after the two downloads.\r\nREM  Close this window and everything stops. Delete %TEMP%\\claudetldr to erase.\r\nREM\r\nREM  Source of every line it runs: https://github.com/KollegDev/claudetldr\r\nREM ===========================================================================\r\n\r\nset \"SRC=https://raw.githubusercontent.com/KollegDev/claudetldr/main\"\r\nset \"DIR=%TEMP%\\claudetldr\"\r\nmkdir \"%DIR%\" 2>nul\r\n\r\necho Downloading the viewer and the local server...\r\ncurl.exe -fsSL \"%SRC%/tools/serve-service.ps1\" -o \"%DIR%\\serve-service.ps1\" || goto :err\r\ncurl.exe -fsSL \"%SRC%/index.html\"              -o \"%DIR%\\index.html\"        || goto :err\r\n\r\nstart \"\" \"http://127.0.0.1:7817/\"\r\necho.\r\necho   Your conversations: http://127.0.0.1:7817/\r\necho   Close this window to stop. Nothing was installed.\r\necho.\r\npowershell -NoProfile -ExecutionPolicy Bypass -File \"%DIR%\\serve-service.ps1\"\r\nexit /b 0\r\n\r\n:err\r\necho.\r\necho   Download failed - are you online? Nothing was changed on your computer.\r\npause\r\nexit /b 1\r\n"}, "win": {"name": "setup.bat", "content": "@echo off\r\nREM ===========================================================================\r\nREM  claudetldr - install (Windows). Short on purpose: read it before running.\r\nREM\r\nREM  What this does, in full:\r\nREM    1. downloads two files from the public repo into %LOCALAPPDATA%\\claudetldr:\r\nREM         tools/serve-service.ps1   (the local server, ~140 readable lines)\r\nREM         index.html                (the viewer)\r\nREM    2. adds ONE per-user autostart entry so it runs after each logon:\r\nREM         HKCU\\...\\CurrentVersion\\Run  ->  claudetldr\r\nREM    3. starts it and opens http://127.0.0.1:7817/\r\nREM\r\nREM  It needs no admin rights, copies none of your conversations anywhere,\r\nREM  listens on 127.0.0.1 only (unreachable from the network), and makes no\r\nREM  outbound connection after the two downloads. uninstall.bat removes all\r\nREM  of it. Prefer no install at all? Use run-once.bat instead.\r\nREM\r\nREM  Source of every line it runs: https://github.com/KollegDev/claudetldr\r\nREM ===========================================================================\r\n\r\nset \"SRC=https://raw.githubusercontent.com/KollegDev/claudetldr/main\"\r\nset \"DIR=%LOCALAPPDATA%\\claudetldr\"\r\nmkdir \"%DIR%\" 2>nul\r\n\r\necho Downloading the viewer and the local server...\r\ncurl.exe -fsSL \"%SRC%/tools/serve-service.ps1\" -o \"%DIR%\\serve-service.ps1\" || goto :err\r\ncurl.exe -fsSL \"%SRC%/index.html\"              -o \"%DIR%\\index.html\"        || goto :err\r\n\r\nREM stop a previous instance so this upgrade takes effect\r\npowershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\"Name='powershell.exe'\\\" | Where-Object { $_.CommandLine -like '*serve-service.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\" >nul 2>nul\r\n\r\nREM start hidden (no console window) at every logon\r\n> \"%DIR%\\run-hidden.vbs\" echo CreateObject(\"WScript.Shell\").Run \"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"\"%DIR%\\serve-service.ps1\"\"\", 0, False\r\nreg add \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v \"claudetldr\" /t REG_SZ /d \"wscript.exe \\\"%DIR%\\run-hidden.vbs\\\"\" /f >nul || goto :err\r\nreg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v \"claudetldr-sync\" /f >nul 2>nul\r\n\r\nstart \"\" wscript.exe \"%DIR%\\run-hidden.vbs\"\r\npowershell -NoProfile -Command \"Start-Sleep -Milliseconds 1500\" >nul\r\nstart \"\" \"http://127.0.0.1:7817/\"\r\n\r\necho.\r\necho   Done - your conversations should be opening in the browser now.\r\necho   Bookmark http://127.0.0.1:7817/  (starts by itself after every logon)\r\necho   Remove it anytime with uninstall.bat\r\necho.\r\npause\r\nexit /b 0\r\n\r\n:err\r\necho.\r\necho   Setup failed - are you online? Run as your normal user (no admin needed).\r\npause\r\nexit /b 1\r\n"}, "uninstall": {"name": "uninstall.bat", "content": "@echo off\r\nREM claudetldr uninstall - removes the sync service installed by setup.bat.\r\nreg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v \"claudetldr\" /f >nul 2>nul\r\nreg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v \"claudetldr-sync\" /f >nul 2>nul\r\npowershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\"Name='powershell.exe'\\\" | Where-Object { $_.CommandLine -like '*serve-service.ps1*' -or $_.CommandLine -like '*sync-service.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\" >nul 2>nul\r\nrd /s /q \"%LOCALAPPDATA%\\claudetldr\" 2>nul\r\necho claudetldr sync removed.\r\necho Nothing else was left behind - the service never copied your data anywhere.\r\necho (If you used an older version, you may still have Downloads\\claude-sessions.)\r\npause\r\n"}, "mac": {"name": "setup-mac.command", "content": "#!/bin/bash\n# ===========================================================================\n#  claudetldr - install (macOS, beta). Short on purpose: read it before running.\n#\n#  What this does, in full:\n#    1. downloads two files from the public repo into\n#       ~/Library/Application Support/claudetldr:\n#         tools/serve.py   (the local server, ~70 readable lines)\n#         index.html       (the viewer)\n#    2. adds one LaunchAgent so it runs after each login\n#    3. starts it and opens http://127.0.0.1:7817/\n#\n#  No admin rights, no copies of your conversations, no outbound connection\n#  after those two downloads, loopback-only socket.\n#\n#  Run with:  bash ~/Downloads/setup-mac.command\n#  Undo:      launchctl unload ~/Library/LaunchAgents/com.claudetldr.plist\n#             rm ~/Library/LaunchAgents/com.claudetldr.plist\n#             rm -rf \"$HOME/Library/Application Support/claudetldr\"\n#\n#  Source of every line it runs: https://github.com/KollegDev/claudetldr\n# ===========================================================================\nset -e\nSRC=\"https://raw.githubusercontent.com/KollegDev/claudetldr/main\"\nDIR=\"$HOME/Library/Application Support/claudetldr\"\nmkdir -p \"$DIR\"\n\necho \"Downloading the viewer and the local server...\"\ncurl -fsSL \"$SRC/tools/serve.py\"  -o \"$DIR/serve.py\"\ncurl -fsSL \"$SRC/index.html\"      -o \"$DIR/index.html\"\n\nPLIST=\"$HOME/Library/LaunchAgents/com.claudetldr.plist\"\nmkdir -p \"$HOME/Library/LaunchAgents\"\ncat > \"$PLIST\" <<PLIST_EOF\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n  <key>Label</key><string>com.claudetldr</string>\n  <key>ProgramArguments</key><array>\n    <string>/usr/bin/python3</string><string>$DIR/serve.py</string>\n  </array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n</dict></plist>\nPLIST_EOF\n\nlaunchctl unload \"$PLIST\" 2>/dev/null || true\nlaunchctl load \"$PLIST\"\nsleep 2\nopen \"http://127.0.0.1:7817/\"\necho \"Done - your conversations should be opening at http://127.0.0.1:7817/\"\n"}};
+  const SETUP_FILES = {"run": {"name": "run-once.bat", "content": "@echo off\r\nREM ===========================================================================\r\nREM  claudetldr - PORTABLE start. Nothing is installed, nothing is remembered.\r\nREM\r\nREM  What this does, in full:\r\nREM    1. downloads two files from the public repo into a temp folder:\r\nREM         tools/serve-service.ps1   (the local server, ~140 readable lines)\r\nREM         index.html                (the viewer)\r\nREM    2. opens http://127.0.0.1:7817/ in your browser\r\nREM    3. runs the server in THIS window until you close it\r\nREM\r\nREM  It does not write to the registry, does not start with Windows, needs no\r\nREM  admin rights, and makes no outbound connection after the two downloads.\r\nREM  Close this window and everything stops. Delete %TEMP%\\claudetldr to erase.\r\nREM\r\nREM  Source of every line it runs: https://github.com/KollegDev/claudetldr\r\nREM ===========================================================================\r\n\r\nset \"SRC=https://raw.githubusercontent.com/KollegDev/claudetldr/main\"\r\nset \"DIR=%TEMP%\\claudetldr\"\r\nmkdir \"%DIR%\" 2>nul\r\n\r\necho Downloading the viewer and the local server...\r\ncurl.exe -fsSL \"%SRC%/tools/serve-service.ps1\" -o \"%DIR%\\serve-service.ps1\" || goto :err\r\ncurl.exe -fsSL \"%SRC%/index.html\"              -o \"%DIR%\\index.html\"        || goto :err\r\n\r\nstart \"\" \"http://127.0.0.1:7817/\"\r\necho.\r\necho   Your conversations: http://127.0.0.1:7817/\r\necho   Close this window to stop. Nothing was installed.\r\necho.\r\npowershell -NoProfile -ExecutionPolicy Bypass -File \"%DIR%\\serve-service.ps1\"\r\nexit /b 0\r\n\r\n:err\r\necho.\r\necho   Download failed - are you online? Nothing was changed on your computer.\r\npause\r\nexit /b 1\r\n"}, "win": {"name": "setup.bat", "content": "@echo off\r\nREM ===========================================================================\r\nREM  claudetldr - install (Windows). Short on purpose: read it before running.\r\nREM\r\nREM  What this does, in full:\r\nREM    1. downloads two files from the public repo into %LOCALAPPDATA%\\claudetldr:\r\nREM         tools/serve-service.ps1   (the local server, ~140 readable lines)\r\nREM         index.html                (the viewer)\r\nREM    2. adds ONE per-user autostart entry so it runs after each logon:\r\nREM         HKCU\\...\\CurrentVersion\\Run  ->  claudetldr\r\nREM    3. starts it and opens http://127.0.0.1:7817/\r\nREM\r\nREM  It needs no admin rights, copies none of your conversations anywhere,\r\nREM  listens on 127.0.0.1 only (unreachable from the network), and makes no\r\nREM  outbound connection after the two downloads. uninstall.bat removes all\r\nREM  of it. Prefer no install at all? Use run-once.bat instead.\r\nREM\r\nREM  Source of every line it runs: https://github.com/KollegDev/claudetldr\r\nREM ===========================================================================\r\n\r\nset \"SRC=https://raw.githubusercontent.com/KollegDev/claudetldr/main\"\r\nset \"DIR=%LOCALAPPDATA%\\claudetldr\"\r\nmkdir \"%DIR%\" 2>nul\r\n\r\necho Downloading the viewer and the local server...\r\ncurl.exe -fsSL \"%SRC%/tools/serve-service.ps1\" -o \"%DIR%\\serve-service.ps1\" || goto :err\r\ncurl.exe -fsSL \"%SRC%/index.html\"              -o \"%DIR%\\index.html\"        || goto :err\r\n\r\nREM stop a previous instance so this upgrade takes effect\r\npowershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\"Name='powershell.exe'\\\" | Where-Object { $_.CommandLine -like '*serve-service.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\" >nul 2>nul\r\n\r\nREM start hidden (no console window) at every logon\r\n> \"%DIR%\\run-hidden.vbs\" echo CreateObject(\"WScript.Shell\").Run \"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"\"%DIR%\\serve-service.ps1\"\"\", 0, False\r\nreg add \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v \"claudetldr\" /t REG_SZ /d \"wscript.exe \\\"%DIR%\\run-hidden.vbs\\\"\" /f >nul || goto :err\r\nreg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v \"claudetldr-sync\" /f >nul 2>nul\r\n\r\nstart \"\" wscript.exe \"%DIR%\\run-hidden.vbs\"\r\npowershell -NoProfile -Command \"Start-Sleep -Milliseconds 1500\" >nul\r\nstart \"\" \"http://127.0.0.1:7817/\"\r\n\r\necho.\r\necho   Done - your conversations should be opening in the browser now.\r\necho   Bookmark http://127.0.0.1:7817/  (starts by itself after every logon)\r\necho   Remove it anytime with uninstall.bat\r\necho.\r\npause\r\nexit /b 0\r\n\r\n:err\r\necho.\r\necho   Setup failed - are you online? Run as your normal user (no admin needed).\r\npause\r\nexit /b 1\r\n"}, "uninstall": {"name": "uninstall.bat", "content": "@echo off\r\nREM claudetldr uninstall - removes the sync service installed by setup.bat.\r\nreg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v \"claudetldr\" /f >nul 2>nul\r\nreg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v \"claudetldr-sync\" /f >nul 2>nul\r\npowershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\"Name='powershell.exe'\\\" | Where-Object { $_.CommandLine -like '*serve-service.ps1*' -or $_.CommandLine -like '*sync-service.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\" >nul 2>nul\r\nrd /s /q \"%LOCALAPPDATA%\\claudetldr\" 2>nul\r\necho claudetldr sync removed.\r\necho Nothing else was left behind - the service never copied your data anywhere.\r\necho (If you used an older version, you may still have Downloads\\claude-sessions.)\r\npause\r\n"}, "mac": {"name": "install.sh", "content": "#!/bin/bash\n# claudetldr installer (macOS / Linux). Read it before running - that is the point.\n#\n#   curl -fsSL https://kollegdev.github.io/claudetldr/install.sh | bash\n#\n# What it does:\n#   1. downloads two files into ~/Library/Application Support/claudetldr\n#      (or ~/.local/share/claudetldr on Linux):\n#        tools/serve.py  - the local server (~120 readable lines)\n#        index.html      - the viewer\n#   2. macOS: adds one LaunchAgent so it starts after each login\n#   3. starts it and opens http://127.0.0.1:7817/\n#\n# No admin rights, no copies of your conversations, no outbound connection\n# afterwards, no telemetry. The server listens on 127.0.0.1 only.\n#\n# Undo (macOS): launchctl unload ~/Library/LaunchAgents/com.claudetldr.plist\n#               rm ~/Library/LaunchAgents/com.claudetldr.plist\n#               rm -rf \"$HOME/Library/Application Support/claudetldr\"\n# Source: https://github.com/KollegDev/claudetldr\nset -e\nSRC=\"https://raw.githubusercontent.com/KollegDev/claudetldr/main\"\n\nif [ \"$(uname)\" = \"Darwin\" ]; then\n  DIR=\"$HOME/Library/Application Support/claudetldr\"\nelse\n  DIR=\"$HOME/.local/share/claudetldr\"\nfi\nmkdir -p \"$DIR\"\n\necho \"  downloading the viewer and the local server...\"\ncurl -fsSL \"$SRC/tools/serve.py\" -o \"$DIR/serve.py\"\ncurl -fsSL \"$SRC/index.html\"     -o \"$DIR/index.html\"\n\npkill -f \"claudetldr.*serve.py\" 2>/dev/null || true\n\nif [ \"$(uname)\" = \"Darwin\" ]; then\n  PLIST=\"$HOME/Library/LaunchAgents/com.claudetldr.plist\"\n  mkdir -p \"$HOME/Library/LaunchAgents\"\n  cat > \"$PLIST\" <<PLIST_EOF\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n  <key>Label</key><string>com.claudetldr</string>\n  <key>ProgramArguments</key><array>\n    <string>/usr/bin/python3</string><string>$DIR/serve.py</string>\n  </array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n</dict></plist>\nPLIST_EOF\n  launchctl unload \"$PLIST\" 2>/dev/null || true\n  launchctl load \"$PLIST\"\n  sleep 2\n  open \"http://127.0.0.1:7817/\"\nelse\n  nohup python3 \"$DIR/serve.py\" >/dev/null 2>&1 &\n  sleep 2\n  (xdg-open \"http://127.0.0.1:7817/\" >/dev/null 2>&1 &) || true\nfi\n\necho \"\"\necho \"  Done - your conversations are opening at http://127.0.0.1:7817/\"\necho \"\"\n"}};
   // __SETUP_FILES_END__
   // ================= public site -> local service hand-off =================
   // The hosted page stays the findable anchor: on load it asks the local
@@ -225,6 +240,24 @@
   function obHint(t) {
     const h = document.getElementById('obHint');
     if (h) h.textContent = t || '';
+  }
+  const CMDS = {
+    install: { text: 'iwr -useb https://kollegdev.github.io/claudetldr/install.ps1 | iex', label: 'use the portable command instead' },
+    run:     { text: 'iwr -useb https://kollegdev.github.io/claudetldr/run.ps1 | iex',     label: 'use the permanent command instead' },
+    mac:     { text: 'curl -fsSL https://kollegdev.github.io/claudetldr/install.sh | bash', label: '' }
+  };
+  let cmdMode = 'install';
+  function copyCmd(id, btn) {
+    const t = document.getElementById(id).textContent;
+    navigator.clipboard.writeText(t).then(
+      () => { btn.textContent = 'copied'; setTimeout(() => btn.textContent = 'copy', 1500); },
+      () => { btn.textContent = 'select it'; });
+  }
+  function swapCmd() {
+    cmdMode = cmdMode === 'install' ? 'run' : 'install';
+    document.getElementById('cmdInstall').textContent = CMDS[cmdMode].text;
+    const link = document.querySelector('[onclick*="swapCmd"]');
+    if (link) link.textContent = CMDS[cmdMode].label;
   }
   function showSource(which) {
     const f = SETUP_FILES[which];
@@ -996,7 +1029,7 @@
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
     caps.push('builtinAI=' + ('Summarizer' in self));
-    const msg = 'v18 ready · ' + caps.join(' · ');
+    const msg = 'v19 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
     if (st && !rootHandle && !rootEntry) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);

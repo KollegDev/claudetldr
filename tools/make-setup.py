@@ -19,7 +19,7 @@ FILES = {
     'run':       'run-once.bat',
     'win':       'setup.bat',
     'uninstall': 'uninstall.bat',
-    'mac':       'setup-mac.command',
+    'mac':       'install.sh',
 }
 
 payload = {}
