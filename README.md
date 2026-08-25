@@ -15,23 +15,25 @@ a single dependency-free HTML file you can also right-click-save and use offline
 
 ## Two ways to use it
 
-### 1. Fully automatic (Windows — v10)
+### 1. One double-click (Windows — v16)
 
-Double-click **`setup.bat`** once. It registers an invisible background task
-(PowerShell, no Python, no admin rights) that mirrors every conversation's
-`audit.jsonl` into `Downloads\claude-sessions` within ~2 seconds of a change.
-Then open the viewer, click **"connect Cowork"** and pick that folder — once.
-The viewer remembers it and reconnects automatically on every visit.
+Download **`setup.bat`** from the viewer and double-click it. That's the entire
+setup: it installs a loopback-only service, opens your conversations in the
+browser, and starts itself after every logon. No folder to pick, no permission
+dialog, no copies of your data anywhere.
 
-The page scans the folder itself, lists every conversation by title (newest
-first, with an ACTIVE badge on running sessions), and follows the one you open
-live — re-parsing on every change. `uninstall.bat` removes everything.
+It works because the service is a local process, not a web page: it reads the
+session store directly and serves both the viewer and the conversations at
+`http://127.0.0.1:7817` (bookmark it). Sessions are listed by their real Cowork
+titles, newest first, with an ACTIVE badge on running ones, and the open chat
+follows the live session. `uninstall.bat` removes everything.
 
-> Why the mirror folder? Chrome's File System Access blocklist hard-refuses
+> Why a local service? Chrome's File System Access blocklist hard-refuses
 > AppData/Library — in the folder picker, for dropped FSA handles, and even
-> through junctions (all three verified). A browser page can never read the
-> store directly and persistently; a one-time invisible sync is the minimum
-> that makes "automatic" possible.
+> through junctions (all three verified). A hosted page can never read the
+> store directly and persistently; serving the page from localhost sidesteps
+> the whole problem, and the loopback socket needs no admin rights and is not
+> reachable from the network.
 
 ### 1b. Zero install: drag & drop
 
@@ -55,9 +57,11 @@ Claude, and with any chat you can copy as text.
 | Path | What it is |
 |---|---|
 | `index.html` | The viewer. Single file, no dependencies. Reads `audit.jsonl` directly. |
-| `setup.bat` / `uninstall.bat` | One-time install/removal of the invisible sync service (Windows). |
-| `tools/sync-service.ps1` | The sync service: mirrors `audit.jsonl` files to `Downloads\claude-sessions`. |
-| `tools/run-hidden.vbs` | Starts the sync service without a console window. |
+| `setup.bat` / `uninstall.bat` | One-time install/removal of the local viewer service (Windows, generated). |
+| `setup-mac.command` | Same for macOS (beta, generated). |
+| `tools/serve-service.ps1.tpl` | Source of the local service: serves the viewer + reads the session store. |
+| `tools/make-setup.py` | Generates both installers and embeds the viewer into them. |
+| `tools/sync-service.ps1` | Pre-v16 mirror service, kept for reference. |
 | `bridge.py` | Legacy CLI bridge: tails an `audit.jsonl` → `chat-mirror.md`. Not needed since v9. |
 | `tools/cowork_inspector.py` | Read-only recon: what the Claude app exposes on your machine. |
 | `tools/peek_audit.py` | Prints an `audit.jsonl`'s structure with values redacted. |
