@@ -86,7 +86,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v11</span></h1>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v12</span></h1>
     <span class="status" id="status">not connected</span>
   </header>
 
@@ -398,6 +398,7 @@
     document.getElementById('backBtn').style.display = 'none';
     document.getElementById('sessions').style.display = '';
     document.getElementById('hintBar').style.display = 'none';
+    if (sumEnabled) document.getElementById('aiBtn').style.display = 'none';
     refreshSessions(true);
     clearInterval(listTimer);
     listTimer = setInterval(() => { if (view === 'sessions') refreshSessions(true); }, 15000);
@@ -581,44 +582,65 @@
       db.transaction('summaries', 'readwrite').objectStore('summaries').put(val, key);
     } catch (e) { /* best effort */ }
   }
-  function scheduleSummaries() {
-    if (!sumEnabled || view !== 'chat') return;
-    sumQueue = entriesState
-      .map((e, i) => ({ e, i }))
-      .filter(x => x.e.kind === 'claude' && x.e.tagged === false && !x.e.ai && x.e.body);
-    processSumQueue();
-  }
-  async function processSumQueue() {
-    if (sumBusy) return;
-    sumBusy = true;
-    const btn = document.getElementById('aiBtn');
-    while (sumQueue.length) {
-      if (btn) { btn.style.display = ''; btn.disabled = true;
-                 btn.textContent = 'AI summarizing · ' + sumQueue.length + ' left'; }
-      const { e, i } = sumQueue.shift();
-      try {
-        const key = await contentHash(e.body);
-        let s = await sumCacheGet(key);
-        if (!s) {
-          if (!summarizer) summarizer = await Summarizer.create({ type: 'tldr', length: 'short', format: 'plain-text' });
-          s = await summarizer.summarize(e.body.slice(0, 6000));
-          s = (s || '').split('\n').find(l => l.trim()) || '';
-          s = s.replace(/^[-*•]\s*/, '').trim();
-          if (s) sumCachePut(key, s);
-        }
-        if (s && entriesState[i] === e) {
-          e.tldr = s; e.ai = true;
-          const el = document.querySelector('#e' + i);
-          if (el) {
-            const t = el.querySelector('.entry-tldr'); if (t) t.textContent = s;
-            const chip = el.querySelector('.entry-num'); if (chip) chip.textContent = 'ai';
-            el.classList.remove('untagged');
-          }
-        }
-      } catch (err) { break; }  // model gone mid-run etc. - retry on next render
+  function applySummary(e, i, s) {
+    e.tldr = s; e.ai = true;
+    const el = document.querySelector('#e' + i);
+    if (el) {
+      const t = el.querySelector('.entry-tldr'); if (t) t.textContent = s;
+      const chip = el.querySelector('.entry-num'); if (chip) chip.textContent = 'ai';
+      el.classList.remove('untagged');
     }
-    if (btn) { btn.style.display = 'none'; btn.disabled = false; btn.textContent = 'enable AI summaries'; }
-    sumBusy = false;
+  }
+  // Called after every render: applies CACHED summaries for free, never
+  // generates. Generation is on demand per chat - the button offers it.
+  let scanBusy = false, genBusy = false, pendingMisses = [];
+  async function scheduleSummaries() {
+    if (!sumEnabled || view !== 'chat' || scanBusy) return;
+    scanBusy = true;
+    try {
+      const jobs = entriesState.map((e, i) => ({ e, i }))
+        .filter(x => x.e.kind === 'claude' && x.e.tagged === false && !x.e.ai && x.e.body);
+      const misses = [];
+      for (const j of jobs) {
+        j.key = await contentHash(j.e.body);
+        const s = await sumCacheGet(j.key);
+        if (s) applySummary(j.e, j.i, s); else misses.push(j);
+      }
+      pendingMisses = misses;
+      const btn = document.getElementById('aiBtn');
+      if (btn && !genBusy && view === 'chat') {
+        if (misses.length) {
+          btn.style.display = ''; btn.disabled = false;
+          btn.textContent = 'summarize this chat (' + misses.length + ')';
+          btn.onclick = startGeneration;
+        } else btn.style.display = 'none';
+      }
+    } finally { scanBusy = false; }
+  }
+  async function startGeneration() {
+    if (genBusy) return;
+    genBusy = true;
+    const btn = document.getElementById('aiBtn');
+    const myCurrent = current;
+    const queue = pendingMisses; pendingMisses = [];
+    while (queue.length) {
+      if (view !== 'chat' || current !== myCurrent) break;   // user left - stop burning compute
+      if (btn) { btn.style.display = ''; btn.disabled = true;
+                 btn.textContent = 'AI summarizing · ' + queue.length + ' left'; }
+      const { e, i, key } = queue.shift();
+      try {
+        if (!summarizer) summarizer = await Summarizer.create({ type: 'tldr', length: 'short', format: 'plain-text' });
+        let s = await summarizer.summarize(e.body.slice(0, 6000));
+        s = ((s || '').split('\n').find(l => l.trim()) || '').replace(/^[-*•]\s*/, '').trim();
+        if (s) {
+          sumCachePut(key, s);
+          if (entriesState[i] === e) applySummary(e, i, s);
+        }
+      } catch (err) { break; }  // model gone mid-run etc.
+    }
+    if (btn) { btn.style.display = 'none'; btn.disabled = false; }
+    genBusy = false;
+    scheduleSummaries();   // re-offer whatever remains
   }
   initSummaries();
 
@@ -805,7 +827,7 @@
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
     caps.push('builtinAI=' + ('Summarizer' in self));
-    const msg = 'v11 ready · ' + caps.join(' · ');
+    const msg = 'v12 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
     if (st && !rootHandle && !rootEntry) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);

@@ -75,16 +75,19 @@ Claude, and with any chat you can copy as text.
 - Viewer: any modern browser (folder-watch mode: Chrome/Edge on localhost).
 - `bridge.py`: Python 3.8+, standard library only.
 
-## AI summaries (v11)
+## AI summaries (v12)
 
-Responses without an inline TL;DR tag are summarized **in the browser** by
+Responses without an inline TL;DR tag can be summarized **in the browser** by
 Chrome's built-in Summarizer API (Gemini Nano) — free, offline, no key, no
-server, mountable on any conversation. If the model isn't on the machine yet,
-an "enable AI summaries" button appears (Chrome downloads it once; needs
-Chrome/Edge 138+, ~22GB free disk, 16GB RAM or a 4GB-VRAM GPU). Summaries are
-cached locally by content hash, so each response is summarized at most once.
-Inline TL;DR tags, where present, always win; without model and tags you get
-the first-line preview.
+server, mountable on any conversation. Generation is **on demand**: open a
+chat and click "summarize this chat (N)"; a counter shows progress (roughly
+5-20s per response on typical hardware). Results are cached locally by
+content hash, so already-summarized responses appear instantly in every chat,
+free of charge — only new material costs compute, and only when you ask.
+If the model isn't on the machine yet, the button reads "enable AI summaries"
+(Chrome downloads it once; needs Chrome/Edge 138+, ~22GB free disk, 16GB RAM
+or a 4GB-VRAM GPU). Inline TL;DR tags, where present, always win; without
+model and tags you get the first-line preview.
 
 ## Roadmap
 
