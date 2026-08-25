@@ -190,7 +190,13 @@ class H(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         parts = urllib.parse.urlparse(self.path)
-        if parts.path in ("/", "/index.html"):
+        if parts.path == "/ping":
+            # presence probe for the public site: no user data, hence the only
+            # route with a permissive CORS header
+            self._send(200, "application/json; charset=utf-8",
+                       b'{"ok":true,"app":"claudetldr"}',
+                       {"Access-Control-Allow-Origin": "*"})
+        elif parts.path in ("/", "/index.html"):
             with open(os.path.join(HERE, "index.html"), "rb") as f:
                 self._send(200, "text/html; charset=utf-8", f.read())
         elif parts.path == "/api/sessions":

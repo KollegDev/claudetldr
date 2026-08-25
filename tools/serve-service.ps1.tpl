@@ -90,7 +90,15 @@ while ($true) {
         $parts = $line -split ' '
         $path = if ($parts.Length -ge 2) { $parts[1] } else { '/' }
 
-        if ($path -eq '/' -or $path.StartsWith('/?') -or $path -eq '/index.html') {
+        if ($path -eq '/ping' -or $path.StartsWith('/ping?')) {
+            # Presence probe for the public site. Carries NO user data, so it is
+            # the only route with a permissive CORS header; /api/* stays
+            # same-origin, i.e. unreadable by any other website.
+            Send-Response $stream 200 'application/json; charset=utf-8' `
+                ([Text.Encoding]::ASCII.GetBytes('{"ok":true,"app":"claudetldr"}')) `
+                @{ 'Access-Control-Allow-Origin' = '*' }
+        }
+        elseif ($path -eq '/' -or $path.StartsWith('/?') -or $path -eq '/index.html') {
             Send-Response $stream 200 'text/html; charset=utf-8' ([Text.Encoding]::UTF8.GetBytes($html)) $null
         }
         elseif ($path -eq '/api/sessions') {
