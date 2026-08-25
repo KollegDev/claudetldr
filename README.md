@@ -75,9 +75,19 @@ Claude, and with any chat you can copy as text.
 - Viewer: any modern browser (folder-watch mode: Chrome/Edge on localhost).
 - `bridge.py`: Python 3.8+, standard library only.
 
+## AI summaries (v11)
+
+Responses without an inline TL;DR tag are summarized **in the browser** by
+Chrome's built-in Summarizer API (Gemini Nano) — free, offline, no key, no
+server, mountable on any conversation. If the model isn't on the machine yet,
+an "enable AI summaries" button appears (Chrome downloads it once; needs
+Chrome/Edge 138+, ~22GB free disk, 16GB RAM or a 4GB-VRAM GPU). Summaries are
+cached locally by content hash, so each response is summarized at most once.
+Inline TL;DR tags, where present, always win; without model and tags you get
+the first-line preview.
+
 ## Roadmap
 
-- Optional cheap-model summaries for chats without TL;DR tags
 - Send-to-Cowork bridge (compose locally, inject into the app)
 - Export a session as a standalone HTML file
 

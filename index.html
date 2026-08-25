@@ -86,7 +86,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v10</span></h1>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v11</span></h1>
     <span class="status" id="status">not connected</span>
   </header>
 
@@ -97,6 +97,7 @@
     <button onclick="setAll(true)">Expand all</button>
     <button onclick="setAll(false)">Collapse all</button>
     <button onclick="loadDemo()">Demo</button>
+    <button id="aiBtn" style="display:none" onclick="enableSummaries()">enable AI summaries</button>
   </div>
 
   <div id="dropzone">
@@ -452,8 +453,12 @@
   // ================= connection: picker (folders outside AppData) =================
   function idb() {
     return new Promise((res, rej) => {
-      const r = indexedDB.open('tldr-viewer', 1);
-      r.onupgradeneeded = () => r.result.createObjectStore('handles');
+      const r = indexedDB.open('tldr-viewer', 2);
+      r.onupgradeneeded = () => {
+        const db = r.result;
+        if (!db.objectStoreNames.contains('handles')) db.createObjectStore('handles');
+        if (!db.objectStoreNames.contains('summaries')) db.createObjectStore('summaries');
+      };
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
     });
@@ -523,6 +528,90 @@
     }
   }
 
+  // ================= AI summaries (Chrome built-in Summarizer / Gemini Nano) =================
+  // For responses without an inline TL;DR tag, summarize locally in the browser.
+  // Free, offline, no key, no server. Cached in IndexedDB by content hash, so
+  // every response is summarized at most once ever. Inline tags always win.
+  let summarizer = null, sumEnabled = false, sumBusy = false, sumQueue = [];
+
+  async function initSummaries() {
+    if (!('Summarizer' in self)) return;
+    try {
+      const a = await Summarizer.availability();
+      if (a === 'available') sumEnabled = true;
+      else if (a === 'downloadable' || a === 'downloading')
+        document.getElementById('aiBtn').style.display = '';
+    } catch (e) { /* API present but unusable - stay silent */ }
+  }
+  async function enableSummaries() {   // needs a user gesture (triggers model download)
+    const btn = document.getElementById('aiBtn');
+    btn.disabled = true; btn.textContent = 'downloading model...';
+    try {
+      summarizer = await Summarizer.create({ type: 'tldr', length: 'short', format: 'plain-text',
+        monitor(m) { m.addEventListener('downloadprogress', e => {
+          btn.textContent = 'model ' + Math.round((e.loaded || 0) * 100) + '%'; }); } });
+      sumEnabled = true;
+      btn.style.display = 'none';
+      scheduleSummaries();
+    } catch (e) { btn.textContent = 'AI summaries unavailable'; }
+  }
+  async function contentHash(text) {
+    const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(b)].slice(0, 16).map(x => x.toString(16).padStart(2, '0')).join('');
+  }
+  async function sumCacheGet(key) {
+    try {
+      const db = await idb();
+      return await new Promise((res, rej) => {
+        const rq = db.transaction('summaries').objectStore('summaries').get(key);
+        rq.onsuccess = () => res(rq.result || null);
+        rq.onerror = () => rej(rq.error);
+      });
+    } catch (e) { return null; }
+  }
+  async function sumCachePut(key, val) {
+    try {
+      const db = await idb();
+      db.transaction('summaries', 'readwrite').objectStore('summaries').put(val, key);
+    } catch (e) { /* best effort */ }
+  }
+  function scheduleSummaries() {
+    if (!sumEnabled || view !== 'chat') return;
+    sumQueue = entriesState
+      .map((e, i) => ({ e, i }))
+      .filter(x => x.e.kind === 'claude' && x.e.tagged === false && !x.e.ai && x.e.body);
+    processSumQueue();
+  }
+  async function processSumQueue() {
+    if (sumBusy) return;
+    sumBusy = true;
+    while (sumQueue.length) {
+      const { e, i } = sumQueue.shift();
+      try {
+        const key = await contentHash(e.body);
+        let s = await sumCacheGet(key);
+        if (!s) {
+          if (!summarizer) summarizer = await Summarizer.create({ type: 'tldr', length: 'short', format: 'plain-text' });
+          s = await summarizer.summarize(e.body.slice(0, 6000));
+          s = (s || '').split('\n').find(l => l.trim()) || '';
+          s = s.replace(/^[-*•]\s*/, '').trim();
+          if (s) sumCachePut(key, s);
+        }
+        if (s && entriesState[i] === e) {
+          e.tldr = s; e.ai = true;
+          const el = document.querySelector('#e' + i);
+          if (el) {
+            const t = el.querySelector('.entry-tldr'); if (t) t.textContent = s;
+            const chip = el.querySelector('.entry-num'); if (chip) chip.textContent = 'ai';
+            el.classList.remove('untagged');
+          }
+        }
+      } catch (err) { break; }  // model gone mid-run etc. - retry on next render
+    }
+    sumBusy = false;
+  }
+  initSummaries();
+
   // ================= rendering =================
   function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
   function renderBody(text) {
@@ -573,6 +662,7 @@
     st.classList.toggle('live', sourceLabel.startsWith('live'));
     document.getElementById('dropzone').classList.add('compact');
     cursor = -1;
+    scheduleSummaries();
   }
 
   // ================= paste fallback (mirror files + flat chats) =================
@@ -704,7 +794,8 @@
     caps.push('protocol=' + location.protocol);
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
-    const msg = 'v10 ready · ' + caps.join(' · ');
+    caps.push('builtinAI=' + ('Summarizer' in self));
+    const msg = 'v11 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
     if (st && !rootHandle && !rootEntry) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);
