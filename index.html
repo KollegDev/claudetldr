@@ -33,11 +33,24 @@
   .controls button:hover { border-color:var(--accent); color:var(--accent); }
   .controls button.primary { border-color:var(--accent); color:var(--accent); font-weight:600; }
   .controls input[type=search] { flex:1; min-width:170px; }
-  #dropzone { border:2px dashed var(--line); border-radius:14px; padding:2rem 1.5rem;
-    text-align:center; color:var(--muted); background:var(--card); margin-bottom:1rem; font-size:.9rem; }
+  #dropzone { border:2px dashed var(--line); border-radius:14px; padding:1.4rem 1.5rem;
+    text-align:left; color:var(--muted); background:var(--card); margin-bottom:1rem; font-size:.9rem; }
   #dropzone strong { color:var(--ink); }
   #dropzone code { font-size:.8rem; }
+  #dropzone a { color:var(--accent); }
   #dropzone.compact { display:none; }
+  /* onboarding checklist */
+  .ob { display:flex; gap:.7rem; margin:.65rem 0; align-items:flex-start; }
+  .ob-n { flex:none; width:1.5rem; height:1.5rem; border-radius:50%; border:1.5px solid var(--line);
+          display:flex; align-items:center; justify-content:center;
+          font-size:.75rem; font-weight:700; color:var(--muted); }
+  .ob.current .ob-n { border-color:var(--accent); color:var(--accent); }
+  .ob.current strong { color:var(--accent); }
+  .ob.done .ob-n { border-color:var(--live); color:var(--live); }
+  .ob-small { font-size:.78rem; display:block; margin-top:.15rem; }
+  .ob-alt { margin-top:.9rem; font-size:.83rem; }
+  .ob-alt summary { cursor:pointer; }
+  #obHint { color:var(--warn); font-size:.85rem; margin-top:.6rem; }
   /* session list */
   .session { background:var(--card); border:1px solid var(--line); border-radius:12px;
              padding:.8rem 1.1rem; margin-bottom:.6rem; cursor:pointer;
@@ -91,7 +104,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v14</span></h1>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v15</span></h1>
     <span class="status" id="status">not connected</span>
   </header>
 
@@ -106,18 +119,34 @@
   </div>
 
   <div id="dropzone">
-    <strong>Out of the box:</strong> download
-    <a href="#" onclick="downloadSetup('win');return false">setup.bat</a> (Windows) or
-    <a href="#" onclick="downloadSetup('mac');return false">setup&#8209;mac.command</a> (macOS, beta)
-    and run it once - it installs an invisible sync that mirrors your conversations to
-    <code>Downloads\claude-sessions</code>. Then click "connect Cowork", pick that folder once,
-    and the viewer reconnects by itself from then on.
-    <br><span style="font-size:.78rem">(Your browser will warn about the downloaded script - keep it.
-    macOS: run with <code>bash ~/Downloads/setup-mac.command</code>.)</span><br>
-    <strong>Zero install:</strong> drag <code>local-agent-mode-sessions</code> onto this page
-    (<kbd>Win</kbd>+<kbd>R</kbd> &rarr; <code>%APPDATA%\Claude</code>; macOS: Finder &rarr;
-    <code>~/Library/Application Support/Claude</code>) - re-drop after a reload.<br>
-    Nothing leaves your browser. Or paste any copied chat (Ctrl+V) anywhere here.
+    <div class="ob" id="ob1">
+      <span class="ob-n">1</span>
+      <div><strong>Install the sync</strong> (once) &mdash; download
+        <a href="#" onclick="downloadSetup('win');obSet(2);return false">setup.bat</a> and double-click it.
+        It invisibly mirrors your conversations to <code>Downloads\claude-sessions</code>, updating every ~2s.
+        <span class="ob-small">Your browser will warn about the .bat - keep it. No admin rights needed.
+        macOS (beta): <a href="#" onclick="downloadSetup('mac');obSet(2);return false">setup&#8209;mac.command</a>,
+        run with <code>bash ~/Downloads/setup-mac.command</code>.</span></div>
+    </div>
+    <div class="ob" id="ob2">
+      <span class="ob-n">2</span>
+      <div><strong>Connect</strong> &mdash; click
+        <a href="#" onclick="connectSessions();return false">connect Cowork</a>, then in the dialog open
+        <code>Downloads</code> &rarr; go <em>into</em> <code>claude-sessions</code> and press "Select folder".
+        If Chrome offers "Allow on every visit", take it - the viewer then reconnects without asking.</div>
+    </div>
+    <div class="ob" id="ob3">
+      <span class="ob-n">3</span>
+      <div><strong>Done</strong> &mdash; your conversations appear by title and follow your sessions live.
+        Open one and click a TL;DR line to swap it for the original.</div>
+    </div>
+    <div id="obHint"></div>
+    <details class="ob-alt"><summary>Alternatives (no install)</summary>
+      Drag the folder <code>local-agent-mode-sessions</code> onto this page
+      (<kbd>Win</kbd>+<kbd>R</kbd> &rarr; <code>%APPDATA%\Claude</code>; macOS: Finder &rarr;
+      <code>~/Library/Application Support/Claude</code>) - re-drop after each reload.
+      Or paste any copied chat (Ctrl+V) anywhere here. Nothing ever leaves your browser.
+    </details>
   </div>
 
   <div id="sessions" style="display:none"></div>
@@ -130,6 +159,20 @@
   // __SETUP_FILES_START__ (generated by tools/make-setup.py - do not edit)
   const SETUP_FILES = {"win": {"name": "setup.bat", "content": "@echo off\r\nsetlocal\r\nREM claudetldr setup (Windows) - self-contained, no admin rights needed.\r\nREM Installs an invisible sync that mirrors your Claude conversations to\r\nREM Downloads\\claude-sessions so the viewer can connect once and reconnect\r\nREM automatically forever after. Generated by tools/make-setup.py.\r\nREM Undo anytime: delete the 'claudetldr-sync' entry under\r\nREM HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run and the folder\r\nREM %LOCALAPPDATA%\\claudetldr (or run uninstall.bat from the repo).\r\n\r\nset \"INSTALL=%LOCALAPPDATA%\\claudetldr\"\r\nmkdir \"%INSTALL%\" 2>nul\r\n\r\nREM stop a running sync instance so upgrades replace the script cleanly\r\npowershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\"Name='powershell.exe'\\\" | Where-Object { $_.CommandLine -like '*sync-service.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\" >nul 2>nul\r\n\r\npowershell -NoProfile -Command \"[IO.File]::WriteAllBytes('%INSTALL%\\sync-service.ps1',[Convert]::FromBase64String('IyBzeW5jLXNlcnZpY2UucHMxIC0gaW52aXNpYmxlIGJhY2tncm91bmQgc3luYyBmb3IgdGhlIGNsYXVkZXRsZHIgdmlld2VyLg0KIw0KIyBNaXJyb3JzIHRoZSBDbGF1ZGUgZGVza3RvcCBhcHAncyBzZXNzaW9uIHN0b3JlIChibG9ja2VkIGZvciBicm93c2VycyBieQ0KIyBDaHJvbWUncyBBcHBEYXRhIGJsb2NrbGlzdCkgaW50byBEb3dubG9hZHNcY2xhdWRlLXNlc3Npb25zLCB3aGljaCB0aGUNCiMgdmlld2VyIENBTiBwaWNrIGFuZCByZW1lbWJlcjoNCiMgICAtIGV2ZXJ5IGF1ZGl0Lmpzb25sIChhbnkgc2l6ZSkNCiMgICAtIGV2ZXJ5IG90aGVyIGZpbGUgdXAgdG8gNTEyIEtCIChzZXNzaW9uIG1ldGFkYXRhLCB0aXRsZXMsIC4uLikNCiMgQ29waWVzIG9ubHkgZmlsZXMgdGhhdCBjaGFuZ2VkOyB0aW1lc3RhbXBzIGFyZSBwcmVzZXJ2ZWQsIHNvIHRoZQ0KIyB2aWV3ZXIncyBzb3J0aW5nIGFuZCBBQ1RJVkUgYmFkZ2Uga2VlcCB3b3JraW5nLg0KIyBBbHNvIHdyaXRlcyBzdG9yZS1tYW5pZmVzdC50eHQgKGEgbGlzdGluZyBvZiBldmVyeXRoaW5nIGluIHRoZSBzdG9yZSkNCiMgb25jZSBwZXIgc2VydmljZSBzdGFydCAtIHVzZWQgZm9yIGRpYWdub3N0aWNzLg0KIw0KIyBJbnN0YWxsZWQgYnkgc2V0dXAuYmF0IGFzIGEgaGlkZGVuIGF1dG9zdGFydCBlbnRyeS4gfjAgQ1BVIHdoaWxlIGlkbGUuDQoNCiRzcmMgPSBKb2luLVBhdGggJGVudjpBUFBEQVRBICdDbGF1ZGVcbG9jYWwtYWdlbnQtbW9kZS1zZXNzaW9ucycNCiMgRG93bmxvYWRzLCBub3QgRG9jdW1lbnRzOiBDaHJvbWUncyBwaWNrZXIgcmVmdXNlcyBEb2N1bWVudHMgY2hpbGRyZW4gb24NCiMgT25lRHJpdmUtcmVkaXJlY3RlZCBzZXR1cHMgKCdjb250YWlucyBzeXN0ZW0gZmlsZXMnKSwgRG93bmxvYWRzIHdvcmtzLg0KJGRzdCA9IEpvaW4tUGF0aCAkZW52OlVTRVJQUk9GSUxFICdEb3dubG9hZHNcY2xhdWRlLXNlc3Npb25zJw0KDQojIHNpbmdsZSBpbnN0YW5jZSBndWFyZA0KJGNyZWF0ZWQgPSAkZmFsc2UNCiRtdXRleCA9IE5ldy1PYmplY3QgU3lzdGVtLlRocmVhZGluZy5NdXRleCgkdHJ1ZSwgJ0dsb2JhbFxjbGF1ZGV0bGRyLXN5bmMnLCBbcmVmXSRjcmVhdGVkKQ0KaWYgKC1ub3QgJGNyZWF0ZWQpIHsgZXhpdCAwIH0NCg0KJHNraXAgPSBAKCdvdXRwdXRzJywndXBsb2FkcycsJ25vZGVfbW9kdWxlcycsJy5naXQnLCcuY2xhdWRlJykNCiRtYXhTbWFsbCA9IDUyNDI4OCAgICMgNTEyIEtCIGNhcCBmb3Igbm9uLWF1ZGl0IGZpbGVzDQoNCmZ1bmN0aW9uIFdyaXRlLU1hbmlmZXN0IHsNCiAgICB0cnkgew0KICAgICAgICAkbGluZXMgPSBOZXctT2JqZWN0IFN5c3RlbS5Db2xsZWN0aW9ucy5HZW5lcmljLkxpc3Rbc3RyaW5nXQ0KICAgICAgICBmdW5jdGlvbiBXYWxrTShbc3RyaW5nXSRkaXIsIFtpbnRdJGRlcHRoKSB7DQogICAgICAgICAgICBpZiAoJGRlcHRoIC1ndCA4KSB7IHJldHVybiB9DQogICAgICAgICAgICB0cnkgeyAkZmlsZXMgPSBbSU8uRGlyZWN0b3J5XTo6RW51bWVyYXRlRmlsZXMoJGRpcikgfSBjYXRjaCB7IHJldHVybiB9DQogICAgICAgICAgICBmb3JlYWNoICgkZiBpbiAkZmlsZXMpIHsNCiAgICAgICAgICAgICAgICB0cnkgeyAkZmkgPSBbSU8uRmlsZUluZm9dOjpuZXcoJGYpOyAkbGluZXMuQWRkKCIkKCRmaS5MZW5ndGgpYHQkZiIpIH0gY2F0Y2ggeyB9DQogICAgICAgICAgICB9DQogICAgICAgICAgICB0cnkgeyAkc3VicyA9IFtJTy5EaXJlY3RvcnldOjpFbnVtZXJhdGVEaXJlY3RvcmllcygkZGlyKSB9IGNhdGNoIHsgcmV0dXJuIH0NCiAgICAgICAgICAgIGZvcmVhY2ggKCRkIGluICRzdWJzKSB7DQogICAgICAgICAgICAgICAgaWYgKCRza2lwIC1jb250YWlucyBbSU8uUGF0aF06OkdldEZpbGVOYW1lKCRkKSkgeyAkbGluZXMuQWRkKCJESVItU0tJUFBFRGB0JGQiKTsgY29udGludWUgfQ0KICAgICAgICAgICAgICAgIFdhbGtNICRkICgkZGVwdGggKyAxKQ0KICAgICAgICAgICAgfQ0KICAgICAgICB9DQogICAgICAgIGlmIChUZXN0LVBhdGggLUxpdGVyYWxQYXRoICRzcmMpIHsgV2Fsa00gJHNyYyAwIH0NCiAgICAgICAgJGNsYXVkZSA9IEpvaW4tUGF0aCAkZW52OkFQUERBVEEgJ0NsYXVkZScNCiAgICAgICAgdHJ5IHsNCiAgICAgICAgICAgIGZvcmVhY2ggKCRmIGluIFtJTy5EaXJlY3RvcnldOjpFbnVtZXJhdGVGaWxlcygkY2xhdWRlKSkgew0KICAgICAgICAgICAgICAgICRmaSA9IFtJTy5GaWxlSW5mb106Om5ldygkZik7ICRsaW5lcy5BZGQoIiQoJGZpLkxlbmd0aClgdCRmIikNCiAgICAgICAgICAgIH0NCiAgICAgICAgICAgIGZvcmVhY2ggKCRkIGluIFtJTy5EaXJlY3RvcnldOjpFbnVtZXJhdGVEaXJlY3RvcmllcygkY2xhdWRlKSkgeyAkbGluZXMuQWRkKCJESVJgdCRkIikgfQ0KICAgICAgICB9IGNhdGNoIHsgfQ0KICAgICAgICBbSU8uRGlyZWN0b3J5XTo6Q3JlYXRlRGlyZWN0b3J5KCRkc3QpIHwgT3V0LU51bGwNCiAgICAgICAgW0lPLkZpbGVdOjpXcml0ZUFsbExpbmVzKChKb2luLVBhdGggJGRzdCAnc3RvcmUtbWFuaWZlc3QudHh0JyksICRsaW5lcykNCiAgICB9IGNhdGNoIHsgfQ0KfQ0KDQpmdW5jdGlvbiBTeW5jLVBhc3Mgew0KICAgIGZ1bmN0aW9uIFdhbGtTKFtzdHJpbmddJGRpciwgW2ludF0kZGVwdGgpIHsNCiAgICAgICAgaWYgKCRkZXB0aCAtZ3QgOCkgeyByZXR1cm4gfQ0KICAgICAgICB0cnkgeyAkZmlsZXMgPSBbSU8uRGlyZWN0b3J5XTo6RW51bWVyYXRlRmlsZXMoJGRpcikgfSBjYXRjaCB7IHJldHVybiB9DQogICAgICAgIGZvcmVhY2ggKCRmIGluICRmaWxlcykgew0KICAgICAgICAgICAgdHJ5IHsNCiAgICAgICAgICAgICAgICAkc2YgPSBbSU8uRmlsZUluZm9dOjpuZXcoJGYpDQogICAgICAgICAgICAgICAgaWYgKCRzZi5OYW1lIC1uZSAnYXVkaXQuanNvbmwnIC1hbmQgJHNmLkxlbmd0aCAtZ3QgJG1heFNtYWxsKSB7IGNvbnRpbnVlIH0NCiAgICAgICAgICAgICAgICAkcmVsID0gJGYuU3Vic3RyaW5nKCRzcmMuTGVuZ3RoICsgMSkNCiAgICAgICAgICAgICAgICAkb3V0ID0gSm9pbi1QYXRoICRkc3QgJHJlbA0KICAgICAgICAgICAgICAgICRvZiAgPSBbSU8uRmlsZUluZm9dOjpuZXcoJG91dCkNCiAgICAgICAgICAgICAgICBpZiAoLW5vdCAkb2YuRXhpc3RzIC1vciAkb2YuTGVuZ3RoIC1uZSAkc2YuTGVuZ3RoIC1vciAkb2YuTGFzdFdyaXRlVGltZVV0YyAtbHQgJHNmLkxhc3RXcml0ZVRpbWVVdGMpIHsNCiAgICAgICAgICAgICAgICAgICAgW0lPLkRpcmVjdG9yeV06OkNyZWF0ZURpcmVjdG9yeShbSU8uUGF0aF06OkdldERpcmVjdG9yeU5hbWUoJG91dCkpIHwgT3V0LU51bGwNCiAgICAgICAgICAgICAgICAgICAgQ29weS1JdGVtIC1MaXRlcmFsUGF0aCAkZiAtRGVzdGluYXRpb24gJG91dCAtRm9yY2UNCiAgICAgICAgICAgICAgICB9DQogICAgICAgICAgICB9IGNhdGNoIHsgfSAjIGZpbGUgbG9ja2VkIG1pZC13cml0ZSBldGMuIC0gbmV4dCBwYXNzIGdldHMgaXQNCiAgICAgICAgfQ0KICAgICAgICB0cnkgeyAkc3VicyA9IFtJTy5EaXJlY3RvcnldOjpFbnVtZXJhdGVEaXJlY3RvcmllcygkZGlyKSB9IGNhdGNoIHsgcmV0dXJuIH0NCiAgICAgICAgZm9yZWFjaCAoJGQgaW4gJHN1YnMpIHsNCiAgICAgICAgICAgIGlmICgkc2tpcCAtY29udGFpbnMgW0lPLlBhdGhdOjpHZXRGaWxlTmFtZSgkZCkpIHsgY29udGludWUgfQ0KICAgICAgICAgICAgV2Fsa1MgJGQgKCRkZXB0aCArIDEpDQogICAgICAgIH0NCiAgICB9DQogICAgaWYgKFRlc3QtUGF0aCAtTGl0ZXJhbFBhdGggJHNyYykgeyBXYWxrUyAkc3JjIDAgfQ0KfQ0KDQpXcml0ZS1NYW5pZmVzdA0Kd2hpbGUgKCR0cnVlKSB7DQogICAgdHJ5IHsgU3luYy1QYXNzIH0gY2F0Y2ggeyB9DQogICAgU3RhcnQtU2xlZXAgLVNlY29uZHMgMg0KfQ0K'))\" || goto :err\r\npowershell -NoProfile -Command \"[IO.File]::WriteAllBytes('%INSTALL%\\run-hidden.vbs',[Convert]::FromBase64String('JyBydW4taGlkZGVuLnZicyAtIHN0YXJ0cyBzeW5jLXNlcnZpY2UucHMxIHdpdGggbm8gdmlzaWJsZSB3aW5kb3cuDQpEaW0gZnNvLCBzaGVsbCwgZGlyDQpTZXQgZnNvID0gQ3JlYXRlT2JqZWN0KCJTY3JpcHRpbmcuRmlsZVN5c3RlbU9iamVjdCIpDQpTZXQgc2hlbGwgPSBDcmVhdGVPYmplY3QoIldTY3JpcHQuU2hlbGwiKQ0KZGlyID0gZnNvLkdldFBhcmVudEZvbGRlck5hbWUoV1NjcmlwdC5TY3JpcHRGdWxsTmFtZSkNCnNoZWxsLlJ1biAicG93ZXJzaGVsbC5leGUgLU5vUHJvZmlsZSAtRXhlY3V0aW9uUG9saWN5IEJ5cGFzcyAtRmlsZSAiIiIgJiBkaXIgJiAiXHN5bmMtc2VydmljZS5wczEiIiIsIDAsIEZhbHNlDQo='))\" || goto :err\r\n\r\nreg add \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v \"claudetldr-sync\" /t REG_SZ /d \"wscript.exe \\\"%INSTALL%\\run-hidden.vbs\\\"\" /f || goto :err\r\nstart \"\" wscript.exe \"%INSTALL%\\run-hidden.vbs\"\r\n\r\necho.\r\necho   claudetldr sync installed and running (invisible).\r\necho.\r\necho   mirrors  %%APPDATA%%\\Claude\\local-agent-mode-sessions\r\necho   to       %%USERPROFILE%%\\Downloads\\claude-sessions   (every ~2 seconds)\r\necho.\r\necho   Last step, once: open the viewer, click \"connect Cowork\" and pick\r\necho   Downloads\\claude-sessions. It reconnects by itself from then on.\r\necho.\r\npause\r\nexit /b 0\r\n\r\n:err\r\necho Setup failed - run this as your normal user (no admin needed).\r\npause\r\nexit /b 1\r\n"}, "mac": {"name": "setup-mac.command", "content": "#!/bin/bash\n# claudetldr setup (macOS, beta) - installs an invisible sync that mirrors\n# your Claude conversations to ~/Downloads/claude-sessions.\n# Downloaded files lose the execute bit, so run it with:\n#     bash ~/Downloads/setup-mac.command\n# Undo:  launchctl unload ~/Library/LaunchAgents/com.claudetldr.sync.plist\n#        rm ~/Library/LaunchAgents/com.claudetldr.sync.plist\n#        rm -rf \"$HOME/Library/Application Support/claudetldr\"\nset -e\nINSTALL=\"$HOME/Library/Application Support/claudetldr\"\nmkdir -p \"$INSTALL\"\n\ncat > \"$INSTALL/sync.sh\" <<'SYNC'\n#!/bin/bash\nSRC=\"$HOME/Library/Application Support/Claude/local-agent-mode-sessions\"\nDST=\"$HOME/Downloads/claude-sessions\"\nwhile true; do\n  if [ -d \"$SRC\" ]; then\n    find \"$SRC\" -name audit.jsonl -print0 2>/dev/null | while IFS= read -r -d '' f; do\n      rel=\"${f#$SRC/}\"; out=\"$DST/$rel\"\n      if [ ! -f \"$out\" ] || [ \"$f\" -nt \"$out\" ]; then\n        mkdir -p \"$(dirname \"$out\")\" && cp -p \"$f\" \"$out\" 2>/dev/null\n      fi\n    done\n  fi\n  sleep 2\ndone\nSYNC\nchmod +x \"$INSTALL/sync.sh\"\n\nPLIST=\"$HOME/Library/LaunchAgents/com.claudetldr.sync.plist\"\nmkdir -p \"$HOME/Library/LaunchAgents\"\ncat > \"$PLIST\" <<PLIST_EOF\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n  <key>Label</key><string>com.claudetldr.sync</string>\n  <key>ProgramArguments</key><array><string>$INSTALL/sync.sh</string></array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n</dict></plist>\nPLIST_EOF\nlaunchctl unload \"$PLIST\" 2>/dev/null || true\nlaunchctl load \"$PLIST\"\necho \"claudetldr sync installed (invisible).\"\necho \"Now open the viewer, click 'connect Cowork' and pick Downloads/claude-sessions once.\"\n"}};
   // __SETUP_FILES_END__
+  // ================= onboarding checklist state =================
+  function obSet(current) {
+    for (let n = 1; n <= 3; n++) {
+      const el = document.getElementById('ob' + n);
+      if (!el) continue;
+      el.classList.toggle('done', n < current);
+      el.classList.toggle('current', n === current);
+      el.querySelector('.ob-n').textContent = n < current ? '✓' : n;
+    }
+  }
+  function obHint(t) {
+    const h = document.getElementById('obHint');
+    if (h) h.textContent = t || '';
+  }
   function downloadSetup(which) {
     const f = SETUP_FILES[which];
     if (!f) return;
@@ -387,9 +430,13 @@
   function renderSessionList() {
     const box = document.getElementById('sessions');
     if (!sessionList.length) {
-      box.innerHTML = '<p class="empty-note">No conversations found here. Drop the <code>local-agent-mode-sessions</code> folder itself (see paths above).</p>';
+      box.innerHTML = '<p class="empty-note">No conversations in this folder.</p>';
+      document.getElementById('dropzone').classList.remove('compact');
+      obSet(2);
+      obHint('The connected folder contains no conversations - probably the wrong one. Reconnect and pick Downloads\\claude-sessions (requires setup.bat from step 1; give it ~30s after the first run).');
       return;
     }
+    obHint('');
     box.innerHTML = '<p class="list-note">' + sessionList.length + ' conversations, newest first - click one to open</p>'
       + sessionList.map((s, i) => {
         const active = Date.now() - s.mtime < ACTIVE_MS;
@@ -535,6 +582,7 @@
   function connected(name) {
     document.getElementById('connectBtn').textContent = 'connected (' + name + ')';
     document.getElementById('dropzone').classList.add('compact');
+    obSet(3); obHint('');
     showSessionList();
   }
   async function connectSessions() {
@@ -562,8 +610,10 @@
       connected(rootHandle.name);
     } catch (e) {
       st.textContent = (e && e.name === 'AbortError')
-        ? 'folder pick cancelled - note: Chrome refuses AppData/Library here; DRAG the folder onto the page instead'
-        : 'folder picker failed (' + (e && e.name || e) + ') - drag the folder onto the page instead';
+        ? 'folder pick cancelled'
+        : 'folder picker failed (' + (e && e.name || e) + ')';
+      obSet(2);
+      obHint('The dialog closed without granting access. Select Downloads\\claude-sessions itself: open the folder IN the dialog, then press "Select folder". (AppData cannot be picked - if you haven\'t run setup.bat yet, that\'s step 1.)');
     }
   }
 
@@ -865,11 +915,12 @@
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
     caps.push('builtinAI=' + ('Summarizer' in self));
-    const msg = 'v14 ready · ' + caps.join(' · ');
+    const msg = 'v15 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
     if (st && !rootHandle && !rootEntry) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);
     document.getElementById('hintBar').style.display = 'none';
+    obSet(1);
   })();
 
   // ================= demo =================
