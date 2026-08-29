@@ -101,15 +101,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, 'application/json; charset=utf-8',
                        json.dumps(sessions()).encode('utf-8'))
         elif parts.path == '/api/audit':
-            sid = urllib.parse.parse_qs(parts.query).get('id', [''])[0]
+            q = urllib.parse.parse_qs(parts.query)
+            sid = q.get('id', [''])[0]
+            try:
+                frm = max(0, int(q.get('from', ['0'])[0]))
+            except ValueError:
+                frm = 0
             full = os.path.realpath(os.path.join(STORE, sid))
             if (full.startswith(os.path.realpath(STORE) + os.sep)
                     and os.path.basename(full) == 'audit.jsonl'
                     and os.path.isfile(full)):
+                st = os.stat(full)
+                # audit.jsonl is append-only: serve just the new bytes.
+                # If the file shrank (rotated/replaced), fall back to the whole
+                # file and tell the client to reset via X-From.
+                if frm > st.st_size:
+                    frm = 0
                 with open(full, 'rb') as f:
+                    if frm:
+                        f.seek(frm)
                     data = f.read()
                 self._send(200, 'text/plain; charset=utf-8', data,
-                           {'X-Mtime': str(int(os.stat(full).st_mtime * 1000))})
+                           {'X-Mtime': str(int(st.st_mtime * 1000)),
+                            'X-Size': str(st.st_size),
+                            'X-From': str(frm)})
             else:
                 self._send(404, 'text/plain', b'not found')
         else:

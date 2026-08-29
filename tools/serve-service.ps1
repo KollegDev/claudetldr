@@ -119,13 +119,16 @@ while ($true) {
             Send-Response $stream 200 'application/json; charset=utf-8' ([Text.Encoding]::UTF8.GetBytes($json)) $null
         }
         elseif ($path.StartsWith('/api/audit')) {
-            $id = $null
+            $id = $null; $from = 0
             if ($path.Contains('?')) {
                 foreach ($kv in ($path.Substring($path.IndexOf('?') + 1) -split '&')) {
                     $p = $kv -split '=', 2
-                    if ($p[0] -eq 'id' -and $p.Length -eq 2) { $id = [Uri]::UnescapeDataString($p[1]) }
+                    if ($p.Length -ne 2) { continue }
+                    if ($p[0] -eq 'id')   { $id = [Uri]::UnescapeDataString($p[1]) }
+                    if ($p[0] -eq 'from') { [int64]::TryParse($p[1], [ref]$from) | Out-Null }
                 }
             }
+            if ($from -lt 0) { $from = 0 }
             $ok = $false; $full = $null
             if ($id) {
                 try { $full = [IO.Path]::GetFullPath((Join-Path $store $id)) } catch { $full = $null }
@@ -136,13 +139,22 @@ while ($true) {
             if ($ok) {
                 $fi = [IO.FileInfo]::new($full)
                 $mt = [int64]([DateTimeOffset]$fi.LastWriteTimeUtc).ToUnixTimeMilliseconds()
+                $size = $fi.Length
+                # audit.jsonl is append-only: serve only the bytes after $from.
+                # If the file shrank (rotated), restart from 0 and say so.
+                if ($from -gt $size) { $from = 0 }
                 $bytes = [byte[]]@()
                 try {
                     $fs = [IO.File]::Open($full, 'Open', 'Read', 'ReadWrite')   # tolerate live writes
-                    try { $ms = New-Object IO.MemoryStream; $fs.CopyTo($ms); $bytes = $ms.ToArray() }
-                    finally { $fs.Close() }
+                    try {
+                        if ($from -gt 0) { $fs.Seek($from, 'Begin') | Out-Null }
+                        $ms = New-Object IO.MemoryStream
+                        $fs.CopyTo($ms)
+                        $bytes = $ms.ToArray()
+                    } finally { $fs.Close() }
                 } catch { }
-                Send-Response $stream 200 'text/plain; charset=utf-8' $bytes @{ 'X-Mtime' = $mt }
+                Send-Response $stream 200 'text/plain; charset=utf-8' $bytes `
+                    @{ 'X-Mtime' = $mt; 'X-Size' = $size; 'X-From' = $from }
             } else {
                 Send-Response $stream 404 'text/plain' ([Text.Encoding]::ASCII.GetBytes('not found')) $null
             }

@@ -110,7 +110,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v20</span></h1>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v21</span></h1>
     <span class="status" id="status">not connected</span>
   </header>
 
@@ -268,6 +268,8 @@
   let current = null;
   let currentMod = 0, currentSize = 0;
   let chatTimer = null, listTimer = null;
+  let curTurns = [], curOffset = 0;     // incremental parse state for the open chat
+  let idleTicks = 0;                    // consecutive polls with nothing new
 
   // ================= audit.jsonl parsing (port of bridge.py) =================
   function stripNoise(t) {
@@ -297,7 +299,7 @@
     }
     return false;
   }
-  function parseAudit(text) {
+  function parseEvents(text) {
     const events = [];
     for (const line of text.split('\n')) {
       const s = line.trim();
@@ -308,9 +310,17 @@
     }
     events.sort((a, b) => String(a.timestamp || a._audit_timestamp || '')
       .localeCompare(String(b.timestamp || b._audit_timestamp || '')));
-    // coalesce ALL assistant output between two user turns into one Claude turn:
-    // agentic sessions emit dozens of tool-call messages per response.
-    const turns = [];
+    return events;
+  }
+  // Appends events into an existing turn list, so a live session only ever
+  // parses the bytes that were appended since the last poll.
+  // coalesce ALL assistant output between two user turns into one Claude turn:
+  // agentic sessions emit dozens of tool-call messages per response.
+  function mergeEvents(turns, events) {
+    let lastUser = null;
+    for (let i = turns.length - 1; i >= 0; i--) {
+      if (turns[i].role === 'You') { lastUser = turns[i]; break; }
+    }
     for (const ev of events) {
       const ts = ev.timestamp || ev._audit_timestamp || '';
       if (ev.type === 'user') {
@@ -318,9 +328,10 @@
         const t = stripNoise(blocksToText((ev.message || {}).content));
         if (!t) continue;
         if (/^Base directory for this skill:/.test(t)) continue;   // skill expansions
-        const prevUser = turns.filter(x => x.role === 'You').pop();
-        if (prevUser && prevUser.text === t) continue;             // duplicated user events
-        turns.push({ role: 'You', text: t, ts });
+        if (lastUser && lastUser.text === t) continue;             // duplicated user events
+        const turn = { role: 'You', text: t, ts };
+        turns.push(turn);
+        lastUser = turn;
       } else if (ev.type === 'assistant') {
         const t = blocksToText((ev.message || {}).content).trim();
         if (!t) continue;
@@ -333,6 +344,21 @@
       }
     }
     return turns;
+  }
+  function parseAudit(text) { return mergeEvents([], parseEvents(text)); }
+  // turnsToEntries builds fresh objects each poll; anything the viewer learned
+  // about an unchanged entry (its AI summary, its content hash, a known cache
+  // miss) is carried over so it is never recomputed or lost.
+  function carryState(prev, next) {
+    for (let i = 0; i < next.length && i < prev.length; i++) {
+      const a = prev[i], b = next[i];
+      if (!a || a.kind !== b.kind) continue;
+      if ((a.body ? a.body.length : -1) !== (b.body ? b.body.length : -1)) continue;
+      if (a.ai) { b.ai = true; b.tldr = a.tldr; }
+      if (a._key) { b._key = a._key; b._keyFor = a._keyFor; }
+      if (a._miss) { b._miss = true; }
+    }
+    return next;
   }
   function turnsToEntries(turns) {
     const entries = []; let turnNo = 0;
@@ -370,6 +396,16 @@
   // Both backends produce session objects: {path, mtime, size, title, file: () => Promise<File>}
   // FSA (picker): persists across reloads, but Chrome refuses AppData/Library folders.
   // Legacy entries (drag & drop): work on ANY folder, live re-reads, but can't be persisted.
+  // Reading only the appended bytes: Blob.slice is lazy, so this touches just
+  // the tail of the file on disk instead of the whole session.
+  function makeTail(getFile) {
+    return async (from) => {
+      const f = await getFile();
+      if (from > f.size) from = 0;                 // file replaced -> full reload
+      const text = await (from ? f.slice(from) : f).text();
+      return { text, from, size: f.size, mtime: f.lastModified };
+    };
+  }
   const entryFile = fe => new Promise((res, rej) => fe.file(res, rej));
   const readAllEntries = d => new Promise((res, rej) => {
     const r = d.createReader(); const all = [];
@@ -384,7 +420,7 @@
       const a = await dir.getFileHandle('audit.jsonl');
       const f = await a.getFile();
       found.push({ path: '/', mtime: f.lastModified, size: f.size, title: null,
-                   file: () => a.getFile(), meta: null });
+                   file: () => a.getFile(), tail: makeTail(() => a.getFile()), meta: null });
       return found;
     } catch (e) { /* normal store root */ }
     async function walk(handle, path, depth) {
@@ -403,7 +439,7 @@
             const f = await audit.getFile();
             const metaH = files.get(name + '.json') || null;
             found.push({ path: path + '/' + name, mtime: f.lastModified, size: f.size, title: null,
-                         file: () => audit.getFile(),
+                         file: () => audit.getFile(), tail: makeTail(() => audit.getFile()),
                          meta: metaH ? () => metaH.getFile() : null });
           } catch (e) { /* skip */ }
         } else {
@@ -426,7 +462,8 @@
           const audit = files.get('audit.jsonl');
           const f = await entryFile(audit);
           found.push({ path: entry.fullPath, mtime: f.lastModified, size: f.size, title: null,
-                       file: () => entryFile(audit), meta: null });
+                       file: () => entryFile(audit), tail: makeTail(() => entryFile(audit)),
+                       meta: null });
         } catch (e) { /* skip */ }
         return;
       }
@@ -440,7 +477,7 @@
             const f = await entryFile(audit);
             const metaE = files.get(d.name + '.json') || null;
             found.push({ path: d.fullPath, mtime: f.lastModified, size: f.size, title: null,
-                         file: () => entryFile(audit),
+                         file: () => entryFile(audit), tail: makeTail(() => entryFile(audit)),
                          meta: metaE ? () => entryFile(metaE) : null });
           } catch (e) { /* skip */ }
         } else {
@@ -463,6 +500,18 @@
         const text = await r.text();
         const mt = Number(r.headers.get('X-Mtime')) || Date.now();
         return new File([text], 'audit.jsonl', { lastModified: mt });
+      },
+      // audit.jsonl only ever grows, so ask for the bytes after `from`.
+      // -> {text, from, size, mtime}; from===0 means "this is the whole file".
+      tail: async (from) => {
+        const r = await fetch('/api/audit?id=' + encodeURIComponent(s.id) + '&from=' + (from | 0),
+                              { cache: 'no-store' });
+        const text = await r.text();
+        const served = Number(r.headers.get('X-From'));
+        return { text,
+                 from: Number.isFinite(served) ? served : 0,
+                 size: Number(r.headers.get('X-Size')) || text.length,
+                 mtime: Number(r.headers.get('X-Mtime')) || Date.now() };
       }
     }));
   }
@@ -558,7 +607,7 @@
   function showSessionList() {
     view = 'sessions';
     current = null;
-    clearInterval(chatTimer);
+    clearTimeout(chatTimer);
     document.getElementById('entries').innerHTML = '';
     document.getElementById('backBtn').style.display = 'none';
     document.getElementById('sessions').style.display = '';
@@ -566,7 +615,9 @@
     document.getElementById('aiBtn').style.display = 'none';
     refreshSessions(true);
     clearInterval(listTimer);
-    listTimer = setInterval(() => { if (view === 'sessions') refreshSessions(true); }, 15000);
+    listTimer = setInterval(() => {
+      if (view === 'sessions' && !document.hidden) refreshSessions(true);
+    }, 15000);
   }
 
   // ================= chat view =================
@@ -579,18 +630,55 @@
     document.getElementById('backBtn').style.display = '';
     document.getElementById('hintBar').style.display = '';
     clearInterval(listTimer);
+    curTurns = []; curOffset = 0; idleTicks = 0;
     await pollChat(true);
-    clearInterval(chatTimer);
-    chatTimer = setInterval(() => pollChat(false), 2000);
+    startChatPolling();
   }
+  // Polling costs nothing to skip: pause entirely while the tab is hidden, and
+  // back off from 2s to 30s on a session that has stopped changing.
+  function pollDelay() {
+    if (idleTicks > 60) return 30000;      // quiet for ~2 min
+    if (idleTicks > 10) return 6000;
+    return 2000;
+  }
+  function startChatPolling() {
+    clearTimeout(chatTimer);
+    const tick = async () => {
+      if (view !== 'chat' || !current) return;
+      if (!document.hidden) await pollChat(false);
+      chatTimer = setTimeout(tick, document.hidden ? 5000 : pollDelay());
+    };
+    chatTimer = setTimeout(tick, pollDelay());
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    idleTicks = 0;                          // catch up immediately on return
+    if (view === 'chat' && current) { pollChat(false); startChatPolling(); }
+    else if (view === 'sessions' && (SERVER_MODE || rootHandle || rootEntry)) refreshSessions(true);
+  });
+  // Incremental: audit.jsonl is append-only, so each poll reads and parses only
+  // the bytes added since the last one, then patches the changed DOM entries.
+  const BYTES = new TextEncoder();
   async function pollChat(force) {
     if (!current) return;
     try {
-      const f = await current.file();
-      if (!force && f.lastModified === currentMod && f.size === currentSize) return;
-      currentMod = f.lastModified; currentSize = f.size;
-      entriesState = turnsToEntries(parseAudit(await f.text()));
+      if (force) { curTurns = []; curOffset = 0; }
+      const r = current.tail ? await current.tail(curOffset)
+                             : await (async () => {           // legacy fallback
+                                 const f = await current.file();
+                                 return { text: await f.text(), from: 0, size: f.size, mtime: f.lastModified };
+                               })();
+      if (r.from === 0) { curTurns = []; curOffset = 0; }      // full (re)load
+      currentMod = r.mtime; currentSize = r.size;
+      if (!r.text) { idleTicks++; return; }                    // nothing appended
+      const lastNl = r.text.lastIndexOf('\n');
+      if (lastNl < 0) { idleTicks++; return; }                 // half-written line; next poll
+      const complete = r.text.slice(0, lastNl + 1);
+      curOffset = r.from + BYTES.encode(complete).length;      // byte-accurate, UTF-8 safe
+      mergeEvents(curTurns, parseEvents(complete));
+      entriesState = carryState(entriesState, turnsToEntries(curTurns));
       sourceLabel = 'live · ' + (current.title || 'session');
+      idleTicks = 0;
       render();
     } catch (e) {
       const st = document.getElementById('status');
@@ -776,9 +864,15 @@
         .filter(x => x.e.kind === 'claude' && x.e.tagged === false && !x.e.ai && x.e.body);
       const misses = [];
       for (const j of jobs) {
-        j.key = await contentHash(j.e.body);
+        // hash + cache lookup once per body, not once per poll
+        if (j.e._key && j.e._keyFor === j.e.body.length) { j.key = j.e._key; }
+        else {
+          j.key = await contentHash(j.e.body);
+          j.e._key = j.key; j.e._keyFor = j.e.body.length;
+        }
+        if (j.e._miss) { misses.push(j); continue; }        // known: not in cache
         const s = await sumCacheGet(j.key);
-        if (s) applySummary(j.e, j.i, s); else misses.push(j);
+        if (s) applySummary(j.e, j.i, s); else { j.e._miss = true; misses.push(j); }
       }
       pendingMisses = misses;
       const btn = document.getElementById('aiBtn');
@@ -831,44 +925,65 @@
     });
     return html;
   }
-  function render() {
-    const box = document.getElementById('entries');
-    if (!entriesState.length) {
-      box.innerHTML = '<p class="empty-note">Nothing parseable found.</p>'; return;
-    }
-    let claudeCount = 0;
-    box.innerHTML = entriesState.map((e, i) => {
-      const expandable = !!e.body;
-      const full = expandable ? `<div class="entry-full"><div class="original">${renderBody(e.body)}</div></div>` : '';
-      if (e.kind === 'user') {
-        return `
-      <article class="entry user ${expandable ? 'expandable' : ''}" id="e${i}" title="turn ${e.num || ''}">
-        <div class="bubble" ${expandable ? 'onclick="toggleEntry(this.parentElement)"' : ''}>
+  // One entry's identity: if this is unchanged, its DOM is left completely
+  // alone - which is what keeps an expanded original expanded, the search
+  // filter applied and the scroll position steady while a session streams in.
+  function entrySig(e) {
+    return [e.kind, e.num, e.tagged === false ? 'u' : 't', e.ai ? 'a' : '',
+            e.tldr || '', e.body ? e.body.length : 0].join(' ');
+  }
+  function entryClass(e) {
+    const expandable = !!e.body;
+    return e.kind === 'user'
+      ? 'entry user' + (expandable ? ' expandable' : '')
+      : 'entry claude' + (e.tagged === false && !e.ai ? ' untagged' : '') + (expandable ? ' expandable' : '');
+  }
+  function entryInner(e) {
+    const expandable = !!e.body;
+    const full = expandable ? `<div class="entry-full"><div class="original">${renderBody(e.body)}</div></div>` : '';
+    if (e.kind === 'user') {
+      return `<div class="bubble" ${expandable ? 'onclick="toggleEntry(this.parentElement)"' : ''}>
           <span class="entry-tldr">${esc(e.tldr || '')}</span>
           ${expandable ? ' <span class="entry-state"></span>' : ''}
           ${full}
-        </div>
-      </article>`;
-      }
-      claudeCount++;
-      const num = e.tagged === false ? (e.ai ? 'ai' : 'untagged') : '#' + (e.num || '?');
-      return `
-      <article class="entry claude ${e.tagged === false && !e.ai ? 'untagged' : ''} ${expandable ? 'expandable' : ''}" id="e${i}">
-        <div class="entry-head" ${expandable ? 'onclick="toggleEntry(this.parentElement)"' : ''}>
+        </div>`;
+    }
+    const num = e.tagged === false ? (e.ai ? 'ai' : 'untagged') : '#' + (e.num || '?');
+    return `<div class="entry-head" ${expandable ? 'onclick="toggleEntry(this.parentElement)"' : ''}>
           <span class="entry-tldr">${esc(e.tldr || '')}</span>
           <span class="entry-num">${num}</span>
           ${expandable ? '<span class="entry-state"></span>' : ''}
-        </div>
-        ${full}
-      </article>`;
-    }).join("");
-    const u = entriesState.filter(e => e.kind === 'user').length;
+        </div>${full}`;
+  }
+  function render() {
+    const box = document.getElementById('entries');
+    if (!entriesState.length) {
+      box.innerHTML = '<p class="empty-note">Nothing parseable found.</p>';
+      return;
+    }
+    if (box.firstElementChild && !box.firstElementChild.classList.contains('entry')) box.innerHTML = '';
+    let claudeCount = 0, users = 0, touched = 0;
+    for (let i = 0; i < entriesState.length; i++) {
+      const e = entriesState[i];
+      if (e.kind === 'claude') claudeCount++; else users++;
+      let el = box.children[i];
+      if (!el) { el = document.createElement('article'); box.appendChild(el); }
+      const sig = entrySig(e);
+      if (el.dataset.sig === sig) continue;          // untouched -> keep its DOM and state
+      const wasOpen = el.classList.contains('open');
+      const wasFocused = el.classList.contains('focused');
+      el.className = entryClass(e) + (wasOpen && e.body ? ' open' : '') + (wasFocused ? ' focused' : '');
+      el.id = 'e' + i;
+      el.innerHTML = entryInner(e);
+      el.dataset.sig = sig;
+      touched++;
+    }
+    while (box.children.length > entriesState.length) box.lastElementChild.remove();
     const st = document.getElementById('status');
-    st.textContent = `${claudeCount} responses · ${u} of your messages · ${sourceLabel} · ${new Date().toLocaleTimeString()}`;
+    st.textContent = `${claudeCount} responses · ${users} of your messages · ${sourceLabel} · ${new Date().toLocaleTimeString()}`;
     st.classList.toggle('live', sourceLabel.startsWith('live'));
     document.getElementById('dropzone').classList.add('compact');
-    cursor = -1;
-    scheduleSummaries();
+    if (touched) scheduleSummaries();
   }
 
   // ================= paste fallback (mirror files + flat chats) =================
@@ -935,7 +1050,7 @@
   function ingest(text, label) {
     if (!text || !text.trim()) return;
     view = 'chat';
-    clearInterval(chatTimer); clearInterval(listTimer);
+    clearTimeout(chatTimer); clearInterval(listTimer);
     document.getElementById('sessions').style.display = 'none';
     document.getElementById('backBtn').style.display = (rootHandle || rootEntry) ? '' : 'none';
     document.getElementById('hintBar').style.display = '';
@@ -1001,7 +1116,7 @@
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
     caps.push('builtinAI=' + ('Summarizer' in self));
-    const msg = 'v20 ready · ' + caps.join(' · ');
+    const msg = 'v21 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
     if (st && !rootHandle && !rootEntry) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);
