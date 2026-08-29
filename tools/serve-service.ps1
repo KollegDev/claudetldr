@@ -100,7 +100,12 @@ while ($true) {
                 @{ 'Access-Control-Allow-Origin' = '*' }
         }
         elseif ($path -eq '/' -or $path.StartsWith('/?') -or $path -eq '/index.html') {
+            # installed layout: index.html sits next to this script.
+            # repo checkout: it sits one level up (tools/serve-service.ps1).
             $file = Join-Path $here 'index.html'
+            if (-not (Test-Path -LiteralPath $file)) {
+                $file = Join-Path (Split-Path -Parent $here) 'index.html'
+            }
             if (Test-Path -LiteralPath $file) {
                 Send-Response $stream 200 'text/html; charset=utf-8' ([IO.File]::ReadAllBytes($file)) $null
             } else {

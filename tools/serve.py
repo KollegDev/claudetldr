@@ -87,7 +87,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                        b'{"ok":true,"app":"claudetldr"}',
                        {'Access-Control-Allow-Origin': '*'})
         elif parts.path in ('/', '/index.html'):
+            # installed layout: index.html next to this script.
+            # repo checkout: one level up (tools/serve.py).
             path = os.path.join(HERE, 'index.html')
+            if not os.path.isfile(path):
+                path = os.path.join(os.path.dirname(HERE), 'index.html')
             if os.path.isfile(path):
                 with open(path, 'rb') as f:
                     self._send(200, 'text/html; charset=utf-8', f.read())
