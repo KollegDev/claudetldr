@@ -27,6 +27,23 @@ $created = $false
 $mutex = New-Object System.Threading.Mutex($true, 'Global\claudetldr-serve', [ref]$created)
 if (-not $created) { Write-Host 'claudetldr is already running.'; exit 0 }
 
+# Titles change rarely, and ConvertFrom-Json is the slowest thing here, so a
+# session's title is only re-read when its metadata file's timestamp moves.
+$titleCache = @{}
+function Get-Title([string]$meta) {
+    if (-not (Test-Path -LiteralPath $meta -PathType Leaf)) { return $null }
+    try { $mt = [IO.File]::GetLastWriteTimeUtc($meta).Ticks } catch { return $null }
+    $hit = $titleCache[$meta]
+    if ($hit -and $hit.Ticks -eq $mt) { return $hit.Title }
+    $title = $null
+    try {
+        $m = Get-Content -LiteralPath $meta -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($m.title) { $title = [string]$m.title }
+    } catch { }
+    $titleCache[$meta] = @{ Ticks = $mt; Title = $title }
+    return $title
+}
+
 function Get-Sessions {
     $out = New-Object System.Collections.Generic.List[object]
     function Walk([string]$dir, [int]$depth) {
@@ -39,14 +56,7 @@ function Get-Sessions {
             if (Test-Path -LiteralPath $audit -PathType Leaf) {
                 try {
                     $fi = [IO.FileInfo]::new($audit)
-                    $title = $null
-                    $meta = Join-Path $dir ($name + '.json')     # Cowork's own title
-                    if (Test-Path -LiteralPath $meta -PathType Leaf) {
-                        try {
-                            $m = Get-Content -LiteralPath $meta -Raw -Encoding UTF8 | ConvertFrom-Json
-                            if ($m.title) { $title = [string]$m.title }
-                        } catch { }
-                    }
+                    $title = Get-Title (Join-Path $dir ($name + '.json'))   # Cowork's own title
                     $out.Add([pscustomobject]@{
                         id    = $audit.Substring($store.Length + 1)
                         title = $title
@@ -64,7 +74,7 @@ function Get-Sessions {
 }
 
 function Send-Response($stream, [int]$code, [string]$ctype, [byte[]]$body, [hashtable]$extra) {
-    $status = @{ 200 = 'OK'; 404 = 'Not Found' }[$code]
+    $status = @{ 200 = 'OK'; 304 = 'Not Modified'; 404 = 'Not Found' }[$code]
     if (-not $status) { $status = 'OK' }
     $sb = "HTTP/1.1 $code $status`r`nContent-Type: $ctype`r`nContent-Length: $($body.Length)`r`n" +
           "Cache-Control: no-store`r`nX-Content-Type-Options: nosniff`r`n"
@@ -116,7 +126,19 @@ while ($true) {
             $json = (Get-Sessions | ConvertTo-Json -Depth 4 -Compress)
             if (-not $json) { $json = '[]' }
             if ($json[0] -ne '[') { $json = '[' + $json + ']' }
-            Send-Response $stream 200 'application/json; charset=utf-8' ([Text.Encoding]::UTF8.GetBytes($json)) $null
+            $body = [Text.Encoding]::UTF8.GetBytes($json)
+            # unchanged list -> 304, no body (the client polls this every 15s)
+            $tag = '"' + $body.Length + '-' + ([BitConverter]::ToString(
+                     [Security.Cryptography.MD5]::Create().ComputeHash($body)) -replace '-','').Substring(0,12) + '"'
+            $inm = ''
+            foreach ($h in ($req -split "`r`n")) {
+                if ($h -match '^(?i)If-None-Match:\s*(.+)$') { $inm = $Matches[1].Trim() }
+            }
+            if ($inm -eq $tag) {
+                Send-Response $stream 304 'application/json; charset=utf-8' ([byte[]]@()) @{ 'ETag' = $tag }
+            } else {
+                Send-Response $stream 200 'application/json; charset=utf-8' $body @{ 'ETag' = $tag }
+            }
         }
         elseif ($path.StartsWith('/api/audit')) {
             $id = $null; $from = 0

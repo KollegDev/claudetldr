@@ -14,7 +14,7 @@ picked or permitted.
 No admin rights, no outbound network, no telemetry, loopback-bound socket.
 Stop it with Ctrl+C (or unload the LaunchAgent).
 """
-import http.server, json, os, socketserver, sys, urllib.parse
+import http.server, json, os, socketserver, sys, urllib.parse, zlib
 
 PORT = int(os.environ.get('CLAUDETLDR_PORT', '7817'))
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +27,25 @@ def store_dir():
     return os.path.expanduser('~/.config/Claude/local-agent-mode-sessions')
 
 STORE = store_dir()
+
+_title_cache = {}          # meta path -> (mtime, title): titles change rarely
+
+def _title_for(meta):
+    try:
+        st = os.stat(meta)
+    except OSError:
+        return None
+    hit = _title_cache.get(meta)
+    if hit and hit[0] == st.st_mtime:
+        return hit[1]
+    title = None
+    try:
+        with open(meta, encoding='utf-8') as f:
+            title = (json.load(f) or {}).get('title')
+    except Exception:
+        title = None
+    _title_cache[meta] = (st.st_mtime, title)
+    return title
 
 def sessions():
     out = []
@@ -42,14 +61,7 @@ def sessions():
                 continue
             audit = os.path.join(e.path, 'audit.jsonl')
             if os.path.isfile(audit):
-                title = None
-                meta = os.path.join(d, e.name + '.json')      # Cowork's own title
-                if os.path.isfile(meta):
-                    try:
-                        with open(meta, encoding='utf-8') as f:
-                            title = (json.load(f) or {}).get('title')
-                    except Exception:
-                        title = None
+                title = _title_for(os.path.join(d, e.name + '.json'))   # Cowork's own title
                 try:
                     st = os.stat(audit)
                 except OSError:
@@ -98,8 +110,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             else:
                 self._send(404, 'text/plain', b'index.html missing')
         elif parts.path == '/api/sessions':
-            self._send(200, 'application/json; charset=utf-8',
-                       json.dumps(sessions()).encode('utf-8'))
+            body = json.dumps(sessions()).encode('utf-8')
+            # the list changes only when a session is touched: let an unchanged
+            # poll answer with 304 and no body at all
+            etag = '"%d-%d"' % (len(body), zlib.crc32(body))
+            if self.headers.get('If-None-Match') == etag:
+                self.send_response(304)
+                self.send_header('ETag', etag)
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+            else:
+                self._send(200, 'application/json; charset=utf-8', body, {'ETag': etag})
         elif parts.path == '/api/audit':
             q = urllib.parse.parse_qs(parts.query)
             sid = q.get('id', [''])[0]

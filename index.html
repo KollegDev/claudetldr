@@ -110,14 +110,14 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v21</span></h1>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v22</span></h1>
     <span class="status" id="status">not connected</span>
   </header>
 
   <div class="controls">
     <button class="primary" id="connectBtn" onclick="connectSessions()">connect Cowork</button>
     <button id="backBtn" onclick="showSessionList()" style="display:none">&larr; sessions</button>
-    <input id="search" type="search" placeholder="Search everything..." oninput="doSearch(this.value)">
+    <input id="search" type="search" placeholder="Search everything..." oninput="queueSearch(this.value)">
     <button onclick="setAll(true)">Expand all</button>
     <button onclick="setAll(false)">Collapse all</button>
     <button onclick="loadDemo()">Demo</button>
@@ -254,7 +254,8 @@
   const SPLIT_RE = /^(###\s*(?:\u{1F9D1}|\u{1F916})\s*(?:You|Claude)[^\n]*)$/mu;
   const SKIP_TYPES = new Set(['system','command_lifecycle','rate_limit_event','tool_progress','result']);
   const SKIP_DIRS  = new Set(['node_modules','.git','outputs','uploads','.claude']);
-  const TITLE_SLICE = 262144;      // bytes read per file for title extraction
+  const TITLE_SLICE = 16384;       // the first user message sits at the top of the file
+  const TITLE_SLICE_MAX = 262144;  // ... unless a long preamble pushes it down
   const ACTIVE_MS   = 5 * 60 * 1000;
   const MAX_SESSIONS = 30;
 
@@ -491,9 +492,14 @@
   // Server mode: the page is served by the local claudetldr service, which
   // reads the session store directly - no picker, no mirror, no permissions.
   const SERVER_MODE = /^(127\.0\.0\.1|localhost)$/.test(location.hostname);
+  let sessionsEtag = null, sessionsCache = null;
   async function scanServer() {
-    const list = await (await fetch('/api/sessions', { cache: 'no-store' })).json();
-    return list.map(s => ({
+    const r = await fetch('/api/sessions', { cache: 'no-store',
+      headers: sessionsEtag ? { 'If-None-Match': sessionsEtag } : {} });
+    if (r.status === 304 && sessionsCache) return sessionsCache;   // nothing changed
+    const list = await r.json();
+    sessionsEtag = r.headers.get('ETag');
+    sessionsCache = list.map(s => ({
       path: s.id, mtime: s.mtime, size: s.size, title: s.title || null, meta: null,
       file: async () => {
         const r = await fetch('/api/audit?id=' + encodeURIComponent(s.id), { cache: 'no-store' });
@@ -514,6 +520,7 @@
                  mtime: Number(r.headers.get('X-Mtime')) || Date.now() };
       }
     }));
+    return sessionsCache;
   }
   async function scanSessions() {
     const found = SERVER_MODE ? await scanServer()
@@ -531,21 +538,33 @@
           return m.title.trim().slice(0, 100);
       } catch (e) { /* fall through to first-message fallback */ }
     }
+    // Persistent cache: a session's title never changes once found, so this is
+    // read once per session ever, not once per page load.
+    const ck = 'title:' + item.path + ':' + item.mtime;
+    const cached = await sumCacheGet(ck);
+    if (cached !== null && cached !== undefined) return cached || null;
     try {
       const f = await item.file();
-      const text = await f.slice(0, TITLE_SLICE).text();
-      const lines = text.split('\n');
-      if (f.size > TITLE_SLICE) lines.pop();      // last line may be truncated
-      for (const line of lines) {
-        const s = line.trim();
-        if (!s) continue;
-        let ev; try { ev = JSON.parse(s); } catch (e) { continue; }
-        if (isRealUserTurn(ev)) {
-          let t = stripNoise(blocksToText((ev.message || {}).content));
-          t = t.split(/\s+/).join(' ');
-          return t.length > 80 ? t.slice(0, 80) + '...' : t;
+      // Read a small head first; only widen if the first user turn is further in.
+      for (const limit of [TITLE_SLICE, TITLE_SLICE_MAX]) {
+        const text = await f.slice(0, limit).text();
+        const lines = text.split('\n');
+        if (f.size > limit) lines.pop();          // last line may be truncated
+        for (const line of lines) {
+          const s = line.trim();
+          if (!s) continue;
+          let ev; try { ev = JSON.parse(s); } catch (e) { continue; }
+          if (isRealUserTurn(ev)) {
+            let t = stripNoise(blocksToText((ev.message || {}).content));
+            t = t.split(/\s+/).join(' ');
+            t = t.length > 80 ? t.slice(0, 80) + '...' : t;
+            sumCachePut(ck, t);
+            return t;
+          }
         }
+        if (f.size <= limit) break;               // whole file already scanned
       }
+      sumCachePut(ck, '');                        // remember "no title in this file"
     } catch (e) { /* fall through */ }
     return null;
   }
@@ -928,6 +947,7 @@
   // One entry's identity: if this is unchanged, its DOM is left completely
   // alone - which is what keeps an expanded original expanded, the search
   // filter applied and the scroll position steady while a session streams in.
+  const searchText = [];          // lowercase tldr+body per entry, kept in step with render
   function entrySig(e) {
     return [e.kind, e.num, e.tagged === false ? 'u' : 't', e.ai ? 'a' : '',
             e.tldr || '', e.body ? e.body.length : 0].join(' ');
@@ -940,7 +960,9 @@
   }
   function entryInner(e) {
     const expandable = !!e.body;
-    const full = expandable ? `<div class="entry-full"><div class="original">${renderBody(e.body)}</div></div>` : '';
+    // The original stays out of the DOM until the entry is first expanded:
+    // collapsed bodies are the bulk of a long chat's markup.
+    const full = expandable ? '<div class="entry-full"></div>' : '';
     if (e.kind === 'user') {
       return `<div class="bubble" ${expandable ? 'onclick="toggleEntry(this.parentElement)"' : ''}>
           <span class="entry-tldr">${esc(e.tldr || '')}</span>
@@ -976,9 +998,12 @@
       el.id = 'e' + i;
       el.innerHTML = entryInner(e);
       el.dataset.sig = sig;
+      searchText[i] = ((e.tldr || '') + ' ' + (e.body || '')).toLowerCase();
+      if (wasOpen && e.body) fillBody(el);          // keep an expanded entry expanded
       touched++;
     }
     while (box.children.length > entriesState.length) box.lastElementChild.remove();
+    searchText.length = entriesState.length;
     const st = document.getElementById('status');
     st.textContent = `${claudeCount} responses · ${users} of your messages · ${sourceLabel} · ${new Date().toLocaleTimeString()}`;
     st.classList.toggle('live', sourceLabel.startsWith('live'));
@@ -1064,20 +1089,59 @@
   });
 
   // ================= interaction =================
-  function toggleEntry(el) { el.classList.toggle('open'); }
-  function setAll(open) { document.querySelectorAll('.entry.expandable').forEach(e => e.classList.toggle('open', open)); }
+  function fillBody(el) {                       // lazily materialise the original
+    const box = el.querySelector('.entry-full');
+    if (!box || box.firstChild) return;
+    const i = parseInt((el.id || '').slice(1), 10);
+    const e = entriesState[i];
+    if (!e || !e.body) return;
+    const d = document.createElement('div');
+    d.className = 'original';
+    d.innerHTML = renderBody(e.body);
+    box.appendChild(d);
+    if (lastQuery) highlight(el, lastQuery);   // opened during an active search
+  }
+  function toggleEntry(el) {
+    if (!el.classList.contains('open')) fillBody(el);
+    el.classList.toggle('open');
+  }
+  function setAll(open) {
+    document.querySelectorAll('.entry.expandable').forEach(e => {
+      if (open) fillBody(e);
+      e.classList.toggle('open', open);
+    });
+  }
+  // Search runs against a prebuilt lowercase index (kept in step with render),
+  // not against the DOM, and is debounced so typing doesn't re-scan per keystroke.
+  let searchTimer = null, lastQuery = null;
+  function queueSearch(v) {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => doSearch(v), 150);
+  }
+  const AUTO_EXPAND_MAX = 12;     // a narrow search opens its hits; a broad one just filters
   function doSearch(q) {
     q = q.trim().toLowerCase();
-    document.querySelectorAll('.entry').forEach(e => {
-      e.querySelectorAll('mark').forEach(m => m.replaceWith(m.textContent));
-      e.normalize();
-      if (!q) { e.classList.remove('hit-hidden'); return; }
-      const hit = e.textContent.toLowerCase().includes(q);
-      e.classList.toggle('hit-hidden', !hit);
-      if (hit && e.classList.contains('expandable')) {
-        e.classList.add('open'); highlight(e, q);
+    if (q === lastQuery) return;
+    lastQuery = q;
+    const box = document.getElementById('entries');
+    const hits = [];
+    for (let i = 0; i < entriesState.length; i++) {
+      const el = box.children[i];
+      if (!el) continue;
+      if (el.querySelector('mark')) {
+        el.querySelectorAll('mark').forEach(m => m.replaceWith(m.textContent)); el.normalize();
       }
-    });
+      if (!q) { el.classList.remove('hit-hidden'); continue; }
+      const hit = (searchText[i] || '').includes(q);
+      el.classList.toggle('hit-hidden', !hit);
+      if (hit) hits.push(el);
+    }
+    if (q && hits.length && hits.length <= AUTO_EXPAND_MAX) {
+      for (const el of hits) {
+        if (!el.classList.contains('expandable')) continue;
+        fillBody(el); el.classList.add('open'); highlight(el, q);
+      }
+    }
   }
   function highlight(root, q) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
@@ -1116,7 +1180,7 @@
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
     caps.push('builtinAI=' + ('Summarizer' in self));
-    const msg = 'v21 ready · ' + caps.join(' · ');
+    const msg = 'v22 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
     if (st && !rootHandle && !rootEntry) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);
