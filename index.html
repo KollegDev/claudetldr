@@ -110,7 +110,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v22</span></h1>
+    <h1>TL;DR Chat Mirror <span style="font-size:.6rem;color:var(--muted);font-weight:400">v23</span></h1>
     <span class="status" id="status">not connected</span>
   </header>
 
@@ -381,9 +381,16 @@
           }
         }
         if (!tldr) {
-          // prefer a real text line over tool-call stubs for the collapsed view
-          const textLine = lines.find(l => l.trim() && !/^\[tool: /.test(l.trim()));
-          tldr = (textLine || lines.find(l => l.trim()) || '(empty)').trim().slice(0, 120);
+          // no inline tag: summarise instantly and locally (no model involved).
+          // Memoised on the turn, which survives polls, so a given response is
+          // summarised once rather than on every 2s rebuild.
+          if (t._sumFor !== t.text.length) {
+            const textLine = lines.find(l => l.trim() && !/^\[tool: /.test(l.trim()));
+            t._sum = extractiveSummary(t.text, 150)
+                  || (textLine || lines.find(l => l.trim()) || '(empty)').trim().slice(0, 120);
+            t._sumFor = t.text.length;
+          }
+          tldr = t._sum;
         }
         const rest = lines.filter((l, i) => i !== tagIdx).join('\n').trim();
         entries.push({ kind: 'claude', num, tagged: tagIdx !== -1, tldr,
@@ -810,6 +817,56 @@
     }
   }
 
+  // ================= instant summaries (no model, works everywhere) =================
+  // Gemini Nano needs a capable GPU: on an older integrated one a single
+  // summary measured ~80-90s, which is unusable for a whole conversation.
+  // This extractive pass costs well under a millisecond and runs on any
+  // machine, so it is the default; the model is opt-in per chat.
+  const STOP = new Set(('the a an and or but if then than that this these those of to in on at for with from by as is are was were be been being it its it\'s you your we our they their he she i me my not no so do does did done can could should would will just also very there here what which who how when where why all any some more most other into over under again further once because while about against between during before after above below up down out off then too only own same s t don now'
+    ).split(' '));
+  const FILLER = /^(let me know|if you|thanks|thank you|feel free|no problem|sure[,.]|happy to|i('| a|'ll| will| can| looked| checked| ran| started)|here('s| is) |that said|hope th|want me to|shall i|do you want)/i;
+  function extractiveSummary(text, maxChars) {
+    maxChars = maxChars || 150;
+    const body = String(text)
+      .replace(/```[\s\S]*?```/g, ' ')          // code blocks carry little summary value
+      .replace(/\[tool: [^\]]*\]/g, ' ')
+      .replace(/https?:\/\/\S+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!body) return '';
+    // sentence split, keeping only sentences of a sane length
+    const sents = body.split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/)
+                      .map(s => s.trim())
+                      .filter(s => s.length >= 25 && s.length <= 400);
+    if (!sents.length) return body.slice(0, maxChars);
+    // word frequencies (minus stopwords) -> score each sentence by its
+    // information density, with a bonus for coming first
+    const freq = new Map();
+    for (const w of body.toLowerCase().match(/[a-z][a-z'-]{2,}/g) || []) {
+      if (STOP.has(w)) continue;
+      freq.set(w, (freq.get(w) || 0) + 1);
+    }
+    let best = sents[0], bestScore = -1;
+    sents.forEach((s, i) => {
+      const words = s.toLowerCase().match(/[a-z][a-z'-]{2,}/g) || [];
+      if (!words.length) return;
+      let score = 0;
+      const seen = new Set();
+      for (const w of words) {
+        if (STOP.has(w) || seen.has(w)) continue;
+        seen.add(w);
+        score += freq.get(w) || 0;
+      }
+      score = score / Math.sqrt(words.length);      // information, damped for length
+      score *= (i === 0 ? 1.35 : i === 1 ? 1.1 : 1); // openings usually state the point
+      score /= (1 + 0.06 * i);                      // later sentences drift into detail
+      if (FILLER.test(s)) score *= 0.45;            // pleasantries and offers are not the point
+      if (/\d/.test(s)) score *= 1.12;              // concrete numbers usually are
+      if (score > bestScore) { bestScore = score; best = s; }
+    });
+    return best.length > maxChars ? best.slice(0, maxChars - 1).replace(/\s\S*$/, '') + '…' : best;
+  }
+
   // ================= AI summaries (Chrome built-in Summarizer / Gemini Nano) =================
   // For responses without an inline TL;DR tag, summarize locally in the browser.
   // Free, offline, no key, no server. Cached in IndexedDB by content hash, so
@@ -898,32 +955,64 @@
       if (btn && !genBusy && view === 'chat') {
         if (misses.length) {
           btn.style.display = ''; btn.disabled = false;
-          btn.textContent = 'summarize this chat (' + misses.length + ')';
-          btn.onclick = startGeneration;
+          btn.textContent = aiSpeedMs > SLOW_MS
+            ? 'sharpen with AI (' + misses.length + ' · slow here, ~' + fmtEta(aiSpeedMs * misses.length) + ')'
+            : 'sharpen with AI (' + misses.length + ')';
+          btn.onclick = () => startGeneration(false);
         } else btn.style.display = 'none';
       }
     } finally { scanBusy = false; }
   }
-  async function startGeneration() {
+  // Gemini Nano's speed depends entirely on the GPU: a few seconds on a modern
+  // one, but ~90s per summary on an older integrated chip (measured). So the
+  // first summary is timed, and if the machine turns out to be slow the run
+  // stops and asks instead of silently burning minutes.
+  const SLOW_MS = 15000;
+  // localStorage throws outright in some privacy contexts - never at module scope
+  let aiSpeedMs = 0;
+  try { aiSpeedMs = Number(localStorage.getItem('tldr-ai-ms')) || 0; } catch (e) {}
+  function fmtEta(ms) {
+    const s = Math.round(ms / 1000);
+    return s < 90 ? s + 's' : Math.round(s / 60) + ' min';
+  }
+  async function startGeneration(confirmedSlow) {
     if (genBusy) return;
     genBusy = true;
     const btn = document.getElementById('aiBtn');
     const myCurrent = current;
     const queue = pendingMisses; pendingMisses = [];
+    let done = 0;
     while (queue.length) {
       if (view !== 'chat' || current !== myCurrent) break;   // user left - stop burning compute
       if (btn) { btn.style.display = ''; btn.disabled = true;
-                 btn.textContent = 'AI summarizing · ' + queue.length + ' left'; }
+                 btn.textContent = 'AI summarizing · ' + queue.length + ' left'
+                   + (aiSpeedMs ? ' · ~' + fmtEta(aiSpeedMs * queue.length) : ''); }
       const { e, i, key } = queue.shift();
+      const t0 = performance.now();
       try {
         if (!summarizer) summarizer = await Summarizer.create({ type: 'tldr', length: 'short', format: 'plain-text' });
-        let s = await summarizer.summarize(e.body.slice(0, 6000));
+        let s = await summarizer.summarize(e.body.slice(0, 4000));
         s = ((s || '').split('\n').find(l => l.trim()) || '').replace(/^[-*•]\s*/, '').trim();
         if (s) {
           sumCachePut(key, s);
           if (entriesState[i] === e) applySummary(e, i, s);
         }
       } catch (err) { break; }  // model gone mid-run etc.
+      const took = performance.now() - t0;
+      aiSpeedMs = aiSpeedMs ? Math.round(aiSpeedMs * 0.5 + took * 0.5) : Math.round(took);
+      try { localStorage.setItem('tldr-ai-ms', String(aiSpeedMs)); } catch (e) {}
+      done++;
+      // one slow summary is enough evidence: hand the decision back
+      if (aiSpeedMs > SLOW_MS && !confirmedSlow && queue.length) {
+        pendingMisses = queue.slice();
+        if (btn) {
+          btn.style.display = ''; btn.disabled = false;
+          btn.textContent = 'slow here (' + fmtEta(aiSpeedMs) + '/summary) · continue ' + queue.length + '?';
+          btn.onclick = () => startGeneration(true);
+        }
+        genBusy = false;
+        return;
+      }
     }
     if (btn) { btn.style.display = 'none'; btn.disabled = false; }
     genBusy = false;
@@ -970,7 +1059,7 @@
           ${full}
         </div>`;
     }
-    const num = e.tagged === false ? (e.ai ? 'ai' : 'untagged') : '#' + (e.num || '?');
+    const num = e.tagged === false ? (e.ai ? 'ai' : 'auto') : '#' + (e.num || '?');
     return `<div class="entry-head" ${expandable ? 'onclick="toggleEntry(this.parentElement)"' : ''}>
           <span class="entry-tldr">${esc(e.tldr || '')}</span>
           <span class="entry-num">${num}</span>
@@ -1180,7 +1269,7 @@
     caps.push('dirPicker=' + (typeof window.showDirectoryPicker === 'function'));
     caps.push('secureContext=' + window.isSecureContext);
     caps.push('builtinAI=' + ('Summarizer' in self));
-    const msg = 'v22 ready · ' + caps.join(' · ');
+    const msg = 'v23 ready · ' + caps.join(' · ');
     const st = document.getElementById('status');
     if (st && !rootHandle && !rootEntry) st.textContent = msg;
     console.log('[tldr-viewer] ' + msg);
